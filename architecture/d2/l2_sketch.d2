@@ -1,0 +1,71 @@
+# Carryover — L2 Containers & Data Flow
+# Render: d2 --sketch l2_sketch.d2 l2_sketch.svg
+
+direction: down
+
+# --- triggers ---
+fswatcher: "fs watcher (notify crate)" {
+  shape: rectangle
+  tooltip: "Watches per-tool transcript directories"
+}
+
+hookendpoint: "HTTP hook endpoint (axum)" {
+  shape: rectangle
+  tooltip: "POST localhost:47823/hook/{tool}/{event}"
+}
+
+# --- transcript sources ---
+sources: "Per-tool transcript sources" {
+  shape: package
+  claude: "~/.claude/projects/{slug}/{uuid}.jsonl"
+  codex: "~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl"
+  cursor: "Cursor workspaceStorage state.vscdb"
+  copilot: "VS Code workspaceStorage chatSessions/*.json"
+  aider: "{cwd}/.aider.chat.history.md"
+  windsurf: "Cascade hook (no on-disk transcript)"
+}
+
+# --- daemon pipeline ---
+daemon: "carryoverd (Rust daemon, single binary)" {
+  shape: rectangle
+  style.fill: "#E8F0FE"
+  style.stroke: "#1A73E8"
+
+  normalizer: "Normalizer\n(JSONL / SQLite / MD -> unified records)"
+  distiller: "Distiller\n(regex + tree-sitter + git -> task / files / failures / TODOs)"
+  publisher: "Publisher\n(handoff.md + AGENTS.md block)"
+
+  normalizer -> distiller
+  distiller -> publisher
+}
+
+# --- storage ---
+ledger: "SQLite ledger\n~/.carryover/ledger.sqlite" {
+  shape: cylinder
+}
+
+handoff: "handoff.md\n~/.carryover/handoff.md (<= 50 lines)" {
+  shape: document
+}
+
+agentsmd: "AGENTS.md (per repo)\nCARRYOVER:START..END block" {
+  shape: document
+}
+
+# --- flows ---
+sources -> fswatcher: "file events"
+sources -> hookendpoint: "hook payload (transcript_path included)"
+fswatcher -> daemon.normalizer: "new records"
+hookendpoint -> daemon.normalizer: "hook envelope"
+daemon.normalizer -> ledger: "append normalized rows"
+daemon.distiller -> ledger: "query recent state"
+daemon.publisher -> handoff: "overwrite (bounded)"
+daemon.publisher -> agentsmd: "overwrite block (bounded)"
+
+# --- restore consumers ---
+sessionstart: "SessionStart hook (Claude / Codex / Copilot)"
+agentread: "Next agent session (any of 6 tools)"
+
+handoff -> sessionstart: "cat to stdout"
+sessionstart -> agentread: "append to context (capped)"
+agentsmd -> agentread: "read on session start"

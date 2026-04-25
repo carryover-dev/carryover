@@ -1,0 +1,42 @@
+# Rust
+/target/
+**/*.rs.bk
+*.profraw
+
+# Local SQLite ledgers and journals from dev / integration tests
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# AI coding agent session state — never push these
+.claude/
+.omc/
+.cursor/
+.aider*
+.codex/
+.windsurfrules
+
+# Internal planning material — keep these outside the public repo
+LAUNCH_CHECKLIST.md
+.gstack/

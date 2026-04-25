@@ -1,0 +1,31 @@
+# Carryover — Resume Protocol sequence
+# Render: d2 --sketch resume_protocol.d2 resume_protocol.svg
+
+shape: sequence_diagram
+
+User
+Agent: "AI Agent\n(Claude / Cursor / Codex / ...)"
+Hook: "SessionStart hook"
+Daemon: "carryoverd"
+Ledger: "SQLite ledger"
+
+User -> Agent: "opens new session\nin project"
+Agent -> Hook: "fires SessionStart"
+Hook -> Daemon: "POST localhost:47823"
+Daemon -> Ledger: "query latest handoff\nfor this project"
+Ledger -> Daemon: "rows"
+Daemon -> Daemon: "distill +\nprepend RESUME\nPROTOCOL: ask\nheader"
+Daemon -> Hook: "path to handoff.md"
+Hook -> Agent: "cat handoff.md\nto stdout (injected)"
+Agent -> Agent: "reads RESUME\nPROTOCOL: ask"
+Agent -> User: "Last task: X.\nLast action: Y.\nNext step: Z.\nContinue from here?"
+
+"User confirms": {
+  User -> Agent: "yes, continue"
+  Agent -> User: "proceeding with Z..."
+}
+
+"User redirects": {
+  User -> Agent: "no, doing\nsomething different"
+  Agent -> User: "OK — carryover\nignored. What do\nyou want to do?"
+}

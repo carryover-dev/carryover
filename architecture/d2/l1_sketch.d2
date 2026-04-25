@@ -1,0 +1,47 @@
+# Carryover — L1 System Context
+# Render: d2 --sketch l1_sketch.d2 l1_sketch.svg
+
+direction: right
+
+agent: "AI Agent" {
+  shape: person
+  tooltip: "Claude Code, Cursor, Codex, Copilot, Windsurf, or Aider — used for code, research, founder work, writing"
+}
+
+dev: Developer {
+  shape: person
+}
+
+carryover: Carryover {
+  shape: rectangle
+  style.fill: "#E8F0FE"
+  style.stroke: "#1A73E8"
+  style.bold: true
+
+  daemon: carryoverd
+  ledger: "SQLite ledger"
+  handoff: "handoff.md (<= 50 lines)"
+}
+
+transcripts: "Tool transcripts on disk" {
+  shape: cylinder
+  tooltip: "Claude JSONL, Codex JSONL, Cursor SQLite, Copilot JSON, Aider Markdown"
+}
+
+agentsmd: "AGENTS.md (per repo)" {
+  shape: document
+}
+
+# Capture path
+agent -> transcripts: "writes session state (JSONL / SQLite / MD)"
+transcripts -> carryover.daemon: "read by fs watcher + hook callbacks"
+carryover.daemon -> carryover.ledger: "normalize + distill"
+
+# Restore path
+carryover.ledger -> carryover.handoff: "publish bounded handoff"
+carryover.handoff -> agentsmd: "write CARRYOVER block"
+carryover.handoff -> agent: "SessionStart stdout injection"
+agentsmd -> agent: "read on next session"
+
+dev -> agent: "prompts / drives"
+dev -> carryover: "install / configure (one-shot)"

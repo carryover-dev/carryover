@@ -1,0 +1,40 @@
+# Carryover — L3 Distiller pipeline (the core deterministic module)
+# Render: d2 --sketch l3_sketch.d2 l3_sketch.svg
+
+direction: right
+
+ledger: "Normalized ledger rows" {
+  shape: cylinder
+}
+
+distiller: "Distiller (deterministic, no LLM)" {
+  shape: rectangle
+  style.fill: "#E8F0FE"
+  style.stroke: "#1A73E8"
+
+  task: "Task extractor\n(last user prompt -> one line)"
+  files: "File extractor\n(last-write-wins, max 10)"
+  failed: "Failure extractor\n(tool_result errors + retry patterns)"
+  questions: "Open-question extractor\n(unresolved errors + TODO)"
+  next: "Next-action extractor\n(final sentence of last assistant turn)"
+  git: "Git context\n(HEAD + diff summary)"
+}
+
+handoff: "handoff.md (<= 50 lines, hard cap)" {
+  shape: document
+  tooltip: "Sections: Task / Recent files / Failed approaches / Open questions / Next action / Full history pointer"
+}
+
+ledger -> distiller.task
+ledger -> distiller.files
+ledger -> distiller.failed
+ledger -> distiller.questions
+ledger -> distiller.next
+ledger -> distiller.git
+
+distiller.task -> handoff: "Task section"
+distiller.files -> handoff: "Recent files section"
+distiller.failed -> handoff: "Failed approaches section"
+distiller.questions -> handoff: "Open questions section"
+distiller.next -> handoff: "Next action section"
+distiller.git -> handoff: "Full history pointer (ledger uuid + git HEAD)"
