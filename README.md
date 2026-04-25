@@ -1,6 +1,21 @@
 # Carryover
 
-> Keeps AI agents on-task across sessions, tool switches, and compaction — without burning context.
+<p align="center">
+  <img src="assets/carryover-logo.png" alt="Carryover" width="820" />
+</p>
+
+<p align="center"><b>Persistent context for AI agents — without burning context.</b></p>
+
+<p align="center">
+  <a href="https://github.com/carryover-dev/carryover/actions/workflows/codeql.yml"><img src="https://github.com/carryover-dev/carryover/actions/workflows/codeql.yml/badge.svg" alt="CodeQL" /></a>
+  <a href="https://www.npmjs.com/package/carryover"><img src="https://img.shields.io/npm/v/carryover/pre?label=npm&color=cb3837" alt="npm" /></a>
+  <a href="https://crates.io/crates/carryover"><img src="https://img.shields.io/crates/v/carryover?label=crates.io&color=dea584" alt="crates.io" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License" /></a>
+  <a href="https://github.com/carryover-dev/carryover/issues/3"><img src="https://img.shields.io/badge/status-alpha-orange" alt="Alpha" /></a>
+  <a href="https://github.com/carryover-dev/carryover/discussions"><img src="https://img.shields.io/github/discussions/carryover-dev/carryover?color=4f46e5" alt="Discussions" /></a>
+</p>
+
+---
 
 **Status: alpha — design docs only, not production ready.** No binaries are shipped yet. The repository today contains the architecture, vision, and roadmap for the v0.1 daemon.
 
