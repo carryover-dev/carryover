@@ -1,6 +1,8 @@
 # Roadmap
 
-This roadmap is intentionally narrow. Items not listed are out of scope until they are listed.
+This is the public-facing milestone summary. For the **detailed engineering roadmap** with feature checkboxes, deliverables, verification criteria, and migration notes per version — see [`RELEASE_ROADMAP.md`](./RELEASE_ROADMAP.md).
+
+This file is intentionally narrow. Items not listed are out of scope until they are listed.
 
 ## v0.1 — MVP
 
