@@ -25,7 +25,7 @@ Carryover is a long-lived local daemon that captures AI agent context from on-di
 
 ## Why does this exist?
 
-AI agents already write a complete transcript of every session to disk — Claude Code as JSONL under `~/.claude/projects/`, Codex CLI under `~/.codex/sessions/`, Cursor as SQLite under VS Code's workspace storage, Aider as Markdown in the working tree, and so on. Yet every existing handoff tool asks the agent to summarize itself, write a markdown file, or call an MCP tool — work the agent has to perform inside its own context window.
+AI agents already write a complete transcript of every session to disk — Claude Code as JSONL under `~/.claude/projects/` (and its companion `CLAUDE.md`), Codex CLI under `~/.codex/sessions/`, Cursor as SQLite under VS Code's workspace storage, Aider as Markdown in the working tree, and so on. Yet every existing handoff tool asks the agent to summarize itself, write a markdown file, or call an MCP tool — work the agent has to perform inside its own context window.
 
 Carryover takes a different path. The state is already on disk. A local daemon reads it, distills a bounded handoff, and writes it back where the next session — same tool or different — will pick it up. The agent never sees the bookkeeping, so the work happens without burning context.
 
@@ -33,11 +33,11 @@ That gives Carryover three properties no competitor has at once:
 
 1. **Capture happens without burning context.** Hooks fire locally, the daemon reads transcripts directly, and the agent does no writing.
 2. **Restore is bounded.** A fifty-line handoff is the contract. Older state lives in the local SQLite ledger, not in the agent's prompt.
-3. **It works across tools.** Claude Code, Cursor, Codex, Copilot, Windsurf, and Aider all converge on the same `AGENTS.md` rail.
+3. **It works across tools.** Claude Code, Cursor, Codex, Copilot, Windsurf, and Aider all converge on the same [`AGENTS.md`](./ARCHITECTURE.md#restore-paths) rail.
 
 ## Architecture
 
-A long-lived user daemon (`carryoverd`) started by `launchd` or `systemd` watches each tool's transcript directory and exposes a local hook endpoint at `localhost:47823`. Captured state flows through a normalizer and a deterministic distiller (regex, AST via tree-sitter, git metadata) into a SQLite ledger at `~/.carryover/ledger.sqlite`, then out to a fifty-line handoff at `~/.carryover/handoff.md` and a bounded `[CARRYOVER]` block inside the project's `AGENTS.md`.
+A long-lived user daemon (`carryoverd`) started by `launchd` or `systemd` watches each tool's transcript directory and exposes a local hook endpoint at `localhost:47823`. Captured state flows through a normalizer and a deterministic distiller (regex, AST via tree-sitter, git metadata) into a SQLite ledger at `~/.carryover/ledger.sqlite`, then out to a fifty-line handoff at `~/.carryover/handoff.md` and a bounded `[CARRYOVER]` block inside the project's [`AGENTS.md`](./ARCHITECTURE.md#restore-paths).
 
 For the full design — including the confirmed transcript-location matrix, the per-tool hook event matrix, the restore paths, and the comparison against existing tools — see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
@@ -83,3 +83,15 @@ Three target users, stated plainly:
 - [Security policy](./SECURITY.md)
 - [Changelog](./CHANGELOG.md)
 - [License (Apache 2.0)](./LICENSE)
+
+
+## FAQ
+
+**Q: Does this run an LLM?**  
+A: No — Carryover is pure code. It reads transcripts, distills them, and writes handoff files. No model inference happens inside the daemon.
+
+**Q: Does any data leave my machine?**  
+A: No — everything is local-only. The ledger lives at `~/.carryover/ledger.sqlite`, handoffs are written to disk, and the daemon only listens on `localhost`.
+
+**Q: What if I close my laptop mid-session?**  
+A: The daemon snapshots before suspend and resumes on wake, so you never lose context across power events.
