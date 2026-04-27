@@ -8,7 +8,11 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
-#[command(name = "carryoverd", version, about = "Zero-LLM-token context-handoff daemon")]
+#[command(
+    name = "carryoverd",
+    version,
+    about = "Zero-LLM-token context-handoff daemon"
+)]
 pub struct Cli {
     /// Path to a config file (overrides ~/.carryover/config.toml)
     #[arg(short, long, global = true, value_name = "PATH")]
