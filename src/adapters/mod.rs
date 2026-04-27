@@ -162,6 +162,8 @@ pub enum AdapterKind {
     Claude(claude::ClaudeAdapter),
     /// Cursor transcript adapter.
     Cursor(cursor::CursorAdapter),
+    /// Codex CLI transcript adapter.
+    Codex(codex::CodexAdapter),
 }
 
 impl AdapterKind {
@@ -171,6 +173,7 @@ impl AdapterKind {
             AdapterKind::Mock(a) => a.name(),
             AdapterKind::Claude(a) => a.name(),
             AdapterKind::Cursor(a) => a.name(),
+            AdapterKind::Codex(a) => a.name(),
         }
     }
 
@@ -180,6 +183,7 @@ impl AdapterKind {
             AdapterKind::Mock(a) => a.detect(),
             AdapterKind::Claude(a) => a.detect(),
             AdapterKind::Cursor(a) => a.detect(),
+            AdapterKind::Codex(a) => a.detect(),
         }
     }
 
@@ -222,6 +226,16 @@ impl AdapterKind {
                 let advanced_json = serde_json::to_string(&advanced)?;
                 Ok((records, advanced_json))
             }
+            AdapterKind::Codex(a) => {
+                let cursor: <codex::CodexAdapter as Adapter>::Cursor = if since_json.is_empty() {
+                    Default::default()
+                } else {
+                    serde_json::from_str(since_json)?
+                };
+                let (records, advanced) = a.read_new_records(&cursor)?;
+                let advanced_json = serde_json::to_string(&advanced)?;
+                Ok((records, advanced_json))
+            }
         }
     }
 
@@ -235,6 +249,7 @@ impl AdapterKind {
             AdapterKind::Mock(a) => a.parse(records),
             AdapterKind::Claude(a) => a.parse(records),
             AdapterKind::Cursor(a) => a.parse(records),
+            AdapterKind::Codex(a) => a.parse(records),
         }
     }
 }
@@ -244,6 +259,7 @@ impl AdapterKind {
 // ---------------------------------------------------------------------------
 
 pub mod claude;
+pub mod codex;
 pub mod cursor;
 
 // ---------------------------------------------------------------------------
@@ -544,5 +560,12 @@ mod tests {
         let a = cursor::CursorAdapter::new();
         let kind = AdapterKind::Cursor(a);
         assert_eq!(kind.name(), "cursor");
+    }
+
+    #[test]
+    fn adapter_kind_dispatches_codex() {
+        let a = codex::CodexAdapter::new();
+        let kind = AdapterKind::Codex(a);
+        assert_eq!(kind.name(), "codex");
     }
 }
