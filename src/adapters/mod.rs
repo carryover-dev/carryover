@@ -160,6 +160,8 @@ pub enum AdapterKind {
     Mock(mock::MockAdapter),
     /// Claude Code transcript adapter.
     Claude(claude::ClaudeAdapter),
+    /// Cursor transcript adapter.
+    Cursor(cursor::CursorAdapter),
 }
 
 impl AdapterKind {
@@ -168,6 +170,7 @@ impl AdapterKind {
         match self {
             AdapterKind::Mock(a) => a.name(),
             AdapterKind::Claude(a) => a.name(),
+            AdapterKind::Cursor(a) => a.name(),
         }
     }
 
@@ -176,6 +179,7 @@ impl AdapterKind {
         match self {
             AdapterKind::Mock(a) => a.detect(),
             AdapterKind::Claude(a) => a.detect(),
+            AdapterKind::Cursor(a) => a.detect(),
         }
     }
 
@@ -208,6 +212,16 @@ impl AdapterKind {
                 let advanced_json = serde_json::to_string(&advanced)?;
                 Ok((records, advanced_json))
             }
+            AdapterKind::Cursor(a) => {
+                let cursor: <cursor::CursorAdapter as Adapter>::Cursor = if since_json.is_empty() {
+                    Default::default()
+                } else {
+                    serde_json::from_str(since_json)?
+                };
+                let (records, advanced) = a.read_new_records(&cursor)?;
+                let advanced_json = serde_json::to_string(&advanced)?;
+                Ok((records, advanced_json))
+            }
         }
     }
 
@@ -220,6 +234,7 @@ impl AdapterKind {
         match self {
             AdapterKind::Mock(a) => a.parse(records),
             AdapterKind::Claude(a) => a.parse(records),
+            AdapterKind::Cursor(a) => a.parse(records),
         }
     }
 }
@@ -229,6 +244,7 @@ impl AdapterKind {
 // ---------------------------------------------------------------------------
 
 pub mod claude;
+pub mod cursor;
 
 // ---------------------------------------------------------------------------
 // Mock adapter
@@ -521,5 +537,12 @@ mod tests {
         let a = claude::ClaudeAdapter::new();
         let kind = AdapterKind::Claude(a);
         assert_eq!(kind.name(), "claude");
+    }
+
+    #[test]
+    fn adapter_kind_dispatches_cursor() {
+        let a = cursor::CursorAdapter::new();
+        let kind = AdapterKind::Cursor(a);
+        assert_eq!(kind.name(), "cursor");
     }
 }
