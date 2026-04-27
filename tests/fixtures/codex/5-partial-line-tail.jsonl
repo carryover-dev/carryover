@@ -1,0 +1,5 @@
+{"type":"session_meta","session_id":"codex-session-005","started_at":1700150000000,"model":"codex-synthetic","cwd":"/synthetic/path/7"}
+{"type":"event_msg","session_id":"codex-session-005","seq":1,"role":"user","content":"What is the difference between concurrency and parallelism?","ts":1700150001000}
+{"type":"event_msg","session_id":"codex-session-005","seq":2,"role":"assistant","content":"Concurrency is about dealing with multiple tasks at once (interleaving); parallelism is about doing multiple tasks simultaneously (true simultaneous execution). Concurrency is a design property; parallelism is a runtime property.","ts":1700150002000}
+{"type":"event_msg","session_id":"codex-session-005","seq":3,"role":"user","content":"Which does async/await give you?","ts":1700150003000}
+{"type":"event_msg","session_id":"codex-session-005","seq":4,"role":"assistant","content":"Async/await gives you concurrency on a single thread by
