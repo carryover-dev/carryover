@@ -6,10 +6,18 @@ on:
   push:
     branches: [main]
 
+# Default to least-privilege; per-job overrides where elevation is required.
+permissions:
+  contents: read
+
 jobs:
   cargo-audit:
     name: cargo-audit
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write           # rustsec/audit-check posts findings as issues
+      checks: write           # and as a check run
     steps:
       - uses: actions/checkout@v4
       - uses: rustsec/audit-check@v2
@@ -19,6 +27,8 @@ jobs:
   cargo-deny:
     name: cargo-deny
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
@@ -31,6 +41,8 @@ jobs:
   secret-scan:
     name: secret-scan
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:

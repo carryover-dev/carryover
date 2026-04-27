@@ -6,6 +6,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   build-test:
     name: build-test (${{ matrix.os }})
@@ -36,5 +39,4 @@ jobs:
       - name: test
         run: cargo test --all-features --no-fail-fast
 
-      - name: detect paths
-        run: bash scripts/detect_paths.sh
+      # detect_paths.sh ships in Phase 2 TASK-03; re-add this step there.
