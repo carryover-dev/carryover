@@ -152,14 +152,14 @@ pub trait Adapter: Send + Sync {
 /// (de)serializing cursors as JSON strings. The daemon worker stores cursors
 /// in the `cursors` SQLite table as JSON blobs anyway, so the erasure is free.
 ///
-/// TODO: real adapter variants (`Claude`, `Cursor`, `Codex`) land in the
-/// follow-up adapter PRs and slot into the `match` arms below. Marked
-/// `#[non_exhaustive]` so adding those variants is non-breaking for any
+/// Marked `#[non_exhaustive]` so adding variants is non-breaking for any
 /// future external `match` site.
 #[non_exhaustive]
 pub enum AdapterKind {
     /// In-memory adapter for tests and pre-adapter scaffolding.
     Mock(mock::MockAdapter),
+    /// Claude Code transcript adapter.
+    Claude(claude::ClaudeAdapter),
 }
 
 impl AdapterKind {
@@ -167,6 +167,7 @@ impl AdapterKind {
     pub fn name(&self) -> &'static str {
         match self {
             AdapterKind::Mock(a) => a.name(),
+            AdapterKind::Claude(a) => a.name(),
         }
     }
 
@@ -174,6 +175,7 @@ impl AdapterKind {
     pub fn detect(&self) -> Result<Option<PathBuf>, AdapterError> {
         match self {
             AdapterKind::Mock(a) => a.detect(),
+            AdapterKind::Claude(a) => a.detect(),
         }
     }
 
@@ -196,6 +198,16 @@ impl AdapterKind {
                 let advanced_json = serde_json::to_string(&advanced)?;
                 Ok((records, advanced_json))
             }
+            AdapterKind::Claude(a) => {
+                let cursor: <claude::ClaudeAdapter as Adapter>::Cursor = if since_json.is_empty() {
+                    Default::default()
+                } else {
+                    serde_json::from_str(since_json)?
+                };
+                let (records, advanced) = a.read_new_records(&cursor)?;
+                let advanced_json = serde_json::to_string(&advanced)?;
+                Ok((records, advanced_json))
+            }
         }
     }
 
@@ -207,9 +219,16 @@ impl AdapterKind {
     ) -> Result<Vec<crate::storage::LedgerRow>, AdapterError> {
         match self {
             AdapterKind::Mock(a) => a.parse(records),
+            AdapterKind::Claude(a) => a.parse(records),
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Adapters
+// ---------------------------------------------------------------------------
+
+pub mod claude;
 
 // ---------------------------------------------------------------------------
 // Mock adapter
@@ -495,5 +514,12 @@ mod tests {
         let json = serde_json::to_string(&cursor).unwrap();
         let restored: MockCursor = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.offset, cursor.offset);
+    }
+
+    #[test]
+    fn adapter_kind_dispatches_claude() {
+        let a = claude::ClaudeAdapter::new();
+        let kind = AdapterKind::Claude(a);
+        assert_eq!(kind.name(), "claude");
     }
 }
