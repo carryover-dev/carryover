@@ -16,7 +16,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-13, macos-14, ubuntu-22.04, ubuntu-24.04]
+        # macos-13 is GitHub-deprecated and has unreliable runner availability.
+        # macos-14 (Sonoma, current floor) covers the macOS path going forward.
+        os: [macos-14, ubuntu-22.04, ubuntu-24.04]
         rust: [stable]
     steps:
       - uses: actions/checkout@v4
