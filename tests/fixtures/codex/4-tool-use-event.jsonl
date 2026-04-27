@@ -1,0 +1,8 @@
+{"type":"session_meta","session_id":"codex-session-004","started_at":1700140000000,"model":"codex-synthetic","cwd":"/synthetic/path/6"}
+{"type":"event_msg","session_id":"codex-session-004","seq":1,"role":"user","content":"List the files in /synthetic/path/6 and count them.","ts":1700140001000}
+{"type":"event_msg","session_id":"codex-session-004","seq":2,"role":"assistant","content":"I will run the list command.","ts":1700140002000,"tool_calls":[{"id":"tc_list_001","name":"shell","input":{"cmd":"ls /synthetic/path/6"}}]}
+{"type":"event_msg","session_id":"codex-session-004","seq":3,"role":"tool","tool_call_id":"tc_list_001","content":"main.rs\nlib.rs\nCargo.toml\n","ts":1700140003000}
+{"type":"event_msg","session_id":"codex-session-004","seq":4,"role":"assistant","content":"There are 3 files: main.rs, lib.rs, and Cargo.toml.","ts":1700140004000}
+{"type":"event_msg","session_id":"codex-session-004","seq":5,"role":"user","content":"Now read Cargo.toml.","ts":1700140005000}
+{"type":"event_msg","session_id":"codex-session-004","seq":6,"role":"assistant","content":"Reading the file now.","ts":1700140006000,"tool_calls":[{"id":"tc_read_001","name":"read_file","input":{"path":"/synthetic/path/6/Cargo.toml"}}]}
+{"type":"event_msg","session_id":"codex-session-004","seq":7,"role":"tool","tool_call_id":"tc_read_001","content":"[package]\nname = \"synthetic\"\nversion = \"0.1.0\"\nedition = \"2021\"\n","ts":1700140007000}

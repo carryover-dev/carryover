@@ -40,3 +40,6 @@ Thumbs.db
 # Internal planning material — keep these outside the public repo
 LAUNCH_CHECKLIST.md
 .gstack/
+
+# Python bytecode caches under tests/
+__pycache__/

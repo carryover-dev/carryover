@@ -1,0 +1,8 @@
+{"type":"session_meta","session_id":"codex-session-003a","started_at":1700120000000,"model":"codex-synthetic","cwd":"/synthetic/path/4"}
+{"type":"event_msg","session_id":"codex-session-003a","seq":1,"role":"user","content":"What is a monad in functional programming?","ts":1700120001000}
+{"type":"event_msg","session_id":"codex-session-003a","seq":2,"role":"assistant","content":"A monad is a design pattern that sequences computations while handling context such as optionality, side effects, or failure. It provides `bind` (chain) and `return` (wrap) operations.","ts":1700120002000}
+{"type":"event_msg","session_id":"codex-session-003a","seq":3,"role":"user","content":"Give a concrete example.","ts":1700120003000}
+{"type":"session_meta","session_id":"codex-session-003b","started_at":1700130000000,"model":"codex-synthetic","cwd":"/synthetic/path/5"}
+{"type":"event_msg","session_id":"codex-session-003b","seq":1,"role":"user","content":"How does Option in Rust relate to the Maybe monad?","ts":1700130001000}
+{"type":"event_msg","session_id":"codex-session-003b","seq":2,"role":"assistant","content":"Rust's Option<T> is isomorphic to Haskell's Maybe monad. The `?` operator acts as monadic bind for Option, short-circuiting on None just as `>>=` short-circuits on Nothing.","ts":1700130002000}
+{"type":"event_msg","session_id":"codex-session-003b","seq":3,"role":"user","content":"Does Rust have a Result monad too?","ts":1700130003000}
