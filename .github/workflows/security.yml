@@ -1,0 +1,57 @@
+name: Security
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Default to least-privilege; per-job overrides where elevation is required.
+permissions:
+  contents: read
+
+jobs:
+  cargo-audit:
+    name: cargo-audit
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write           # rustsec/audit-check posts findings as issues
+      checks: write           # and as a check run
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  cargo-deny:
+    name: cargo-deny
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          # NOTE: action's default `command: check` is implicit; passing `check` here
+          # again would duplicate the positional argument. Pass only flags.
+          arguments: --all-features
+          command-arguments: --hide-inclusion-graph
+
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # gitleaks-action v2 requires a paid license for organizations.
+      # trufflehog OSS is free, well-maintained, and integrates the same way.
+      - uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.pull_request.base.sha || github.event.before }}
+          head: ${{ github.event.pull_request.head.sha || github.sha }}
+          extra_args: --results=verified,unknown

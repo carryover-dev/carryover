@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: build-test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-13 is GitHub-deprecated and has unreliable runner availability.
+        # macos-14 (Sonoma, current floor) covers the macOS path going forward.
+        os: [macos-14, ubuntu-22.04, ubuntu-24.04]
+        rust: [stable]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: build
+        run: cargo build --release --all-features
+
+      - name: test
+        run: cargo test --all-features --no-fail-fast
+
+      # detect_paths.sh ships in Phase 2 TASK-03; re-add this step there.

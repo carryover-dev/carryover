@@ -1,0 +1,37 @@
+[package]
+name = "carryover"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Zero-LLM-token context-handoff daemon — resume any AI session across Claude Code, Cursor, and Codex."
+repository = "https://github.com/carryover-dev/carryover"
+readme = "README.md"
+rust-version = "1.80"
+
+[[bin]]
+name = "carryoverd"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+axum = "0.8.9"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "fs"] }
+notify = "8.2.0"
+notify-debouncer-full = "0.7.0"
+rusqlite = { version = "0.39", features = ["bundled", "serde_json"] }
+rusqlite_migration = "2.5"
+dialoguer = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+dirs = "5"
+semver = "1"
+thiserror = "1"
+anyhow = "1"
+tempfile = "3"
+
+[dev-dependencies]
+assert_cmd = "2.2.1"
+predicates = "3.1.4"
