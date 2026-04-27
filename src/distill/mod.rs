@@ -1,5 +1,15 @@
-//! Distillation pipeline: 3 always-on extractors (task, open_questions, next_action)
-//! + 3 coding-only (recent_files, failed_approaches, git_context).
+//! Distillation pipeline: pure-code extractors that turn LedgerRow batches
+//! into the components of the 50-line handoff payload.
 //!
-//! 50-line cap on output. No LLM tokens consumed; all extraction is rule-based.
-//! See ARCHITECTURE.md for extractor contract and RELEASE_ROADMAP.md for v0.1 scope.
+//! Always-on extractors (this PR):
+//! - task: condenses the latest user prompt into one line
+//! - open_questions: detects unresolved decisions/TODOs across the session
+//! - next_action: extracts the final actionable instruction
+//!
+//! Coding-only extractors (recent_files / failed_approaches / git_context)
+//! ship in a follow-up PR; they activate only when the session contains
+//! tool_use rows.
+
+pub mod next_action;
+pub mod open_questions;
+pub mod task;
