@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use super::config::Config;
 use super::hooks_writer;
 use super::install::hook_pairs_for;
+use crate::publish::ensure_pointer_block;
 use crate::toolspec::specs::ALL_TOOLS;
 
 pub fn run() -> Result<()> {
@@ -51,11 +52,28 @@ pub fn run() -> Result<()> {
         let modified = match tool_name.as_str() {
             "claude" => hooks_writer::write_claude_hooks(&config_path, &pairs)
                 .with_context(|| format!("refresh claude hooks at {}", config_path.display()))?,
-            "cursor" => hooks_writer::write_cursor_hooks(&config_path, &pairs)
-                .with_context(|| format!("refresh cursor hooks at {}", config_path.display()))?,
+            "cursor" => {
+                hooks_writer::write_cursor_wrapper_scripts(&home, &pairs)
+                    .with_context(|| "refresh cursor wrapper scripts")?;
+                hooks_writer::write_cursor_hooks(&config_path, &pairs)
+                    .with_context(|| format!("refresh cursor hooks at {}", config_path.display()))?
+            }
             "codex" => {
-                eprintln!("  codex: skipping hook stub write (TOML editing lands in a follow-up)");
-                false
+                hooks_writer::write_codex_wrapper_script(&home)
+                    .with_context(|| "refresh codex notify script")?;
+                let m =
+                    hooks_writer::write_codex_notify(&config_path, &home).with_context(|| {
+                        format!("refresh codex notify at {}", config_path.display())
+                    })?;
+                for md in &[
+                    home.join(".codex").join("AGENTS.md"),
+                    home.join("AGENTS.md"),
+                    home.join("CLAUDE.md"),
+                ] {
+                    ensure_pointer_block(md)
+                        .with_context(|| format!("refresh pointer block at {}", md.display()))?;
+                }
+                m
             }
             _ => false,
         };

@@ -259,12 +259,20 @@ pub fn write_cursor_hooks(settings_path: &Path, hooks: &[(&str, &str)]) -> Resul
     };
     let mut modified = false;
 
-    // Migration: remove the old bare-string sessionStart entry written by v0.0.x.
-    if let Some(v) = map.get("sessionStart") {
-        if v.is_string() && v.as_str().map(|s| s.contains("carryover")).unwrap_or(false) {
-            map.remove("sessionStart");
-            modified = true;
-        }
+    // Migration: remove any old bare-string hook entries written by v0.0.x.
+    // Old installs wrote cursor hooks as plain curl strings (not wrapper objects).
+    // We identify them by our daemon port number.
+    let port_str = LOOPBACK_PORT.to_string();
+    let stale_keys: Vec<String> = map
+        .iter()
+        .filter(|(_, v)| {
+            v.is_string() && v.as_str().map(|s| s.contains(&*port_str)).unwrap_or(false)
+        })
+        .map(|(k, _)| k.clone())
+        .collect();
+    for key in stale_keys {
+        map.remove(&key);
+        modified = true;
     }
 
     for (_tool, event) in hooks {
@@ -307,15 +315,20 @@ pub fn remove_cursor_hooks(path: &Path, events: &[&str]) -> Result<bool> {
         Value::Object(m) => m,
         _ => return Ok(false),
     };
+    let port_str = LOOPBACK_PORT.to_string();
     let mut modified = false;
     for event in events {
         let script = cursor_wrapper_path(&home, event);
         let script_str = script.to_string_lossy().into_owned();
         let is_ours = map.get(*event).map(|v| {
-            v.as_str().map(|s| s.contains("carryover")).unwrap_or(false)
+            // Old bare-string format: contains our port number.
+            v.as_str()
+                .map(|s| s.contains(&*port_str))
+                .unwrap_or(false)
+                // New object format: command points to our wrapper script.
                 || v.get("command")
                     .and_then(|c| c.as_str())
-                    .map(|s| s == script_str || s.contains("carryover"))
+                    .map(|s| s == script_str || s.contains(".carryover/hooks/"))
                     .unwrap_or(false)
         });
         if is_ours == Some(true) && map.remove(*event).is_some() {
