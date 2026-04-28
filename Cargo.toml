@@ -31,8 +31,10 @@ semver = "1"
 thiserror = "1"
 anyhow = "1"
 tempfile = "3"
+chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
 assert_cmd = "2.2.1"
 predicates = "3.1.4"
 tower = { version = "0.5", features = ["util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
