@@ -83,11 +83,12 @@ impl Pipeline {
             }
         }
 
-        // Ingest all configured adapters — each adapter reads from its own
-        // paths and returns nothing if those paths haven't changed.
-        // fs-watch events don't carry a cwd, so use home_dir as project_dir.
-        let project_dir = self.home_dir.clone();
+        // Ingest all configured adapters. Derive project_dir from the stored
+        // cursor's transcript path so the handoff is written to the right
+        // project directory rather than always going to home_dir.
         for tool in self.adapters.keys() {
+            let project_dir = infer_project_dir_from_cursor(&self.ledger, tool, &self.home_dir)
+                .unwrap_or_else(|| self.home_dir.clone());
             if let Err(e) = self.ingest(tool, "default", evt.rescan, &project_dir) {
                 self.log_error(tool, "default", &format!("{e:#}"));
             }
@@ -260,6 +261,40 @@ fn find_claude_project_transcript(home_dir: &Path, project_dir: &Path) -> Option
         }
     }
     newest.map(|(_, p)| p)
+}
+
+/// Infer the project directory from the stored cursor for `tool`.
+///
+/// Claude encodes project paths as the transcript file's grandparent directory
+/// name: `/home/rohit/.claude/projects/-home-rohit-workspace-test4/<uuid>.jsonl`.
+/// The slug `-home-rohit-workspace-test4` is the full absolute path with every
+/// `/` replaced by `-`. Reversing it: replace all `-` with `/`.
+///
+/// Returns `None` when:
+/// - No cursor is stored yet for the tool.
+/// - The cursor JSON has no `file_path` key.
+/// - The decoded path does not exist as a directory.
+fn infer_project_dir_from_cursor(
+    ledger: &Ledger,
+    tool: &str,
+    home_dir: &Path,
+) -> Option<PathBuf> {
+    let cursor_json = ledger.load_cursor(tool, "default").ok()??;
+    if cursor_json.is_empty() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(&cursor_json).ok()?;
+    let file_path = v.get("file_path")?.as_str()?;
+    let path = Path::new(file_path);
+    // Parent dir is the per-project subdir inside ~/.claude/projects/
+    let slug = path.parent()?.file_name()?.to_string_lossy();
+    // Slug starts with `-` (leading `/` encoded); decode by replacing `-` → `/`.
+    let decoded = slug.replace('-', "/");
+    let candidate = PathBuf::from(&decoded);
+    if candidate.is_dir() && candidate != home_dir {
+        return Some(candidate);
+    }
+    None
 }
 
 fn build_adapter_map(tools: &[String]) -> HashMap<String, AdapterKind> {
