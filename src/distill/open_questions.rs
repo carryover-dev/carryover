@@ -7,6 +7,7 @@
 //! - Sentences (delimited by `. `, `! `, `? `, or end-of-string) that end
 //!   with a `?` character.
 
+use super::util::truncate_at_word;
 use crate::storage::LedgerRow;
 use std::collections::HashSet;
 
@@ -160,23 +161,7 @@ fn push_bullet(raw: String, seen: &mut HashSet<String>, bullets: &mut Vec<String
         return;
     }
     seen.insert(canonical.clone());
-    bullets.push(truncate_bullet(&canonical));
-}
-
-/// Truncate `s` to at most `MAX_BULLET_CHARS` chars. If truncation is needed,
-/// cut at the last whitespace boundary and append `…`.
-fn truncate_bullet(s: &str) -> String {
-    let char_count = s.chars().count();
-    if char_count <= MAX_BULLET_CHARS {
-        return s.to_string();
-    }
-    let prefix: String = s.chars().take(MAX_BULLET_CHARS).collect();
-    if let Some(boundary) = prefix.rfind(|c: char| c.is_ascii_whitespace()) {
-        let trimmed = prefix[..boundary].trim_end();
-        format!("{}…", trimmed)
-    } else {
-        format!("{}…", prefix)
-    }
+    bullets.push(truncate_at_word(&canonical, MAX_BULLET_CHARS));
 }
 
 // ---------------------------------------------------------------------------
