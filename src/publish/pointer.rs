@@ -55,6 +55,13 @@ pub fn ensure_pointer_block(path: &Path) -> std::io::Result<bool> {
     ensure_pointer_block_with_path(path, &handoff_path)
 }
 
+/// Insert the pointer block using a relative `.carryover/handoff.md` path.
+/// Use this for project-level AGENTS.md / CLAUDE.md that live inside the repo;
+/// the relative path resolves correctly from any checkout location.
+pub fn ensure_pointer_block_relative(path: &Path) -> std::io::Result<bool> {
+    ensure_pointer_block_with_path(path, Path::new(".carryover/handoff.md"))
+}
+
 /// Like `ensure_pointer_block` but with an explicit handoff path (used in tests
 /// and by the per-project publish path in future versions).
 pub fn ensure_pointer_block_with_path(path: &Path, handoff_path: &Path) -> std::io::Result<bool> {

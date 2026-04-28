@@ -55,7 +55,15 @@ impl Pipeline {
             .session_id
             .clone()
             .unwrap_or_else(|| "default".to_string());
-        if let Err(e) = self.ingest(&evt.tool, &session_id, false) {
+        // Use the hook's cwd as project_dir if it's a real existing directory;
+        // fall back to home_dir when absent or nonexistent.
+        let project_dir = evt
+            .cwd
+            .as_ref()
+            .filter(|p| p.is_dir())
+            .cloned()
+            .unwrap_or_else(|| self.home_dir.clone());
+        if let Err(e) = self.ingest(&evt.tool, &session_id, false, &project_dir) {
             self.log_error(&evt.tool, &session_id, &format!("{e:#}"));
         }
     }
@@ -77,8 +85,10 @@ impl Pipeline {
 
         // Ingest all configured adapters — each adapter reads from its own
         // paths and returns nothing if those paths haven't changed.
+        // fs-watch events don't carry a cwd, so use home_dir as project_dir.
+        let project_dir = self.home_dir.clone();
         for tool in self.adapters.keys() {
-            if let Err(e) = self.ingest(tool, "default", evt.rescan) {
+            if let Err(e) = self.ingest(tool, "default", evt.rescan, &project_dir) {
                 self.log_error(tool, "default", &format!("{e:#}"));
             }
         }
@@ -86,7 +96,7 @@ impl Pipeline {
 
     /// Core ingest: load cursor → read new records → parse → insert → advance
     /// cursor → distill → publish.
-    fn ingest(&self, tool: &str, session_id: &str, force_rescan: bool) -> Result<()> {
+    fn ingest(&self, tool: &str, session_id: &str, force_rescan: bool, project_dir: &Path) -> Result<()> {
         let adapter = match self.adapters.get(tool) {
             Some(a) => a,
             None => return Ok(()), // tool not in config
@@ -110,11 +120,11 @@ impl Pipeline {
         self.ledger
             .save_cursor(tool, session_id, &new_cursor_json)?;
 
-        self.distill_and_publish(tool, session_id, &rows)?;
+        self.distill_and_publish(tool, session_id, &rows, project_dir)?;
         Ok(())
     }
 
-    fn distill_and_publish(&self, tool: &str, session_id: &str, rows: &[LedgerRow]) -> Result<()> {
+    fn distill_and_publish(&self, tool: &str, session_id: &str, rows: &[LedgerRow], project_dir: &Path) -> Result<()> {
         let distilled = Distilled {
             source_tool: tool.to_string(),
             session_id: session_id.to_string(),
@@ -129,9 +139,7 @@ impl Pipeline {
 
         let ctx = PublishContext {
             home_dir: self.home_dir.clone(),
-            // v0.1: write to home dir (global handoff).
-            // Per-project dir requires CWD in hook payload — future PR.
-            project_dir: self.home_dir.clone(),
+            project_dir: project_dir.to_path_buf(),
             resume_mode: self.resume_mode.clone(),
         };
 
@@ -248,7 +256,7 @@ mod tests {
     #[test]
     fn ingest_mock_produces_ledger_rows() {
         let (pipeline, dir) = test_pipeline();
-        pipeline.ingest("mock", "session-1", false).unwrap();
+        pipeline.ingest("mock", "session-1", false, &pipeline.home_dir.clone()).unwrap();
         let rows = pipeline.ledger.query_recent("mock", 100).unwrap();
         assert!(
             !rows.is_empty(),
@@ -266,7 +274,7 @@ mod tests {
     #[test]
     fn ingest_unknown_tool_is_noop() {
         let (pipeline, dir) = test_pipeline();
-        pipeline.ingest("unknown", "s1", false).unwrap();
+        pipeline.ingest("unknown", "s1", false, &pipeline.home_dir.clone()).unwrap();
         assert_eq!(
             pipeline.ledger.query_recent("unknown", 10).unwrap().len(),
             0
@@ -278,9 +286,9 @@ mod tests {
     fn ingest_idempotent_after_cursor_advance() {
         // Second ingest with an advanced cursor should return 0 new rows.
         let (pipeline, dir) = test_pipeline();
-        pipeline.ingest("mock", "s1", false).unwrap();
+        pipeline.ingest("mock", "s1", false, &pipeline.home_dir.clone()).unwrap();
         let count_after_first = pipeline.ledger.query_recent("mock", 100).unwrap().len();
-        pipeline.ingest("mock", "s1", false).unwrap();
+        pipeline.ingest("mock", "s1", false, &pipeline.home_dir.clone()).unwrap();
         let count_after_second = pipeline.ledger.query_recent("mock", 100).unwrap().len();
         assert_eq!(
             count_after_first, count_after_second,
@@ -292,10 +300,10 @@ mod tests {
     #[test]
     fn force_rescan_re_reads_from_start() {
         let (pipeline, dir) = test_pipeline();
-        pipeline.ingest("mock", "s1", false).unwrap();
+        pipeline.ingest("mock", "s1", false, &pipeline.home_dir.clone()).unwrap();
         let count_after_normal = pipeline.ledger.query_recent("mock", 100).unwrap().len();
         // Force rescan: resets cursor then re-reads all records.
-        pipeline.ingest("mock", "s1", true).unwrap();
+        pipeline.ingest("mock", "s1", true, &pipeline.home_dir.clone()).unwrap();
         let count_after_rescan = pipeline.ledger.query_recent("mock", 100).unwrap().len();
         // Rescan should produce ≥ as many rows as the first ingest.
         assert!(
@@ -318,7 +326,7 @@ mod tests {
             files_touched_json: None,
             parent_id: None,
         }];
-        pipeline.distill_and_publish("mock", "s1", &rows).unwrap();
+        pipeline.distill_and_publish("mock", "s1", &rows, &pipeline.home_dir.clone()).unwrap();
         let handoff = dir.path().join(".carryover").join("handoff.md");
         assert!(handoff.exists(), "handoff.md should be written");
         let body = std::fs::read_to_string(&handoff).unwrap();
@@ -338,6 +346,7 @@ mod tests {
             event: "SessionEnd".to_string(),
             transcript_path: None,
             session_id: Some("hook-session".to_string()),
+            cwd: None,
             extra: serde_json::Map::new(),
         };
         pipeline.process_hook(&evt);

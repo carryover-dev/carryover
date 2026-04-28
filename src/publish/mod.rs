@@ -21,7 +21,8 @@ mod write_atomic;
 
 pub use handoff::{render_handoff, Distilled, MAX_HANDOFF_LINES};
 pub use pointer::{
-    ensure_pointer_block, pointer_block, remove_pointer_block, POINTER_END, POINTER_START,
+    ensure_pointer_block, ensure_pointer_block_relative, pointer_block, remove_pointer_block,
+    POINTER_END, POINTER_START,
 };
 
 use std::path::{Path, PathBuf};
@@ -105,12 +106,36 @@ pub fn publish(
     let project_bytes = std::fs::read(&project_handoff)?;
     assert_eq!(user_bytes, project_bytes, "dual-write divergence");
 
-    // STEP 4. Pointer block in AGENTS.md and CLAUDE.md (byte-identical,
-    // atomic, symlink-rejected).
-    let agents_md = canonical_project.join("AGENTS.md");
-    let claude_md = canonical_project.join("CLAUDE.md");
-    let agents_md_modified = pointer::ensure_pointer_block(&agents_md)?;
-    let claude_md_modified = pointer::ensure_pointer_block(&claude_md)?;
+    // STEP 4. Pointer blocks in AGENTS.md and CLAUDE.md.
+    //
+    // Two cases:
+    // a) project_dir == home_dir (v0.1 fallback, no CWD from hook) →
+    //    write global ~/AGENTS.md + ~/CLAUDE.md with an absolute path.
+    // b) project_dir is a real project dir (v0.2, CWD present in hook) →
+    //    write project-level AGENTS.md + CLAUDE.md with a relative path
+    //    so the files are portable when the repo is cloned elsewhere;
+    //    also keep the global files up to date for cross-tool sessions.
+    let canonical_home = ctx.home_dir.canonicalize().unwrap_or_else(|_| ctx.home_dir.clone());
+    let is_project_level = canonical_project != canonical_home;
+
+    let (agents_md, claude_md, agents_md_modified, claude_md_modified) = if is_project_level {
+        // Project-level: relative pointer in the repo.
+        let agents = canonical_project.join("AGENTS.md");
+        let claude = canonical_project.join("CLAUDE.md");
+        let a = pointer::ensure_pointer_block_relative(&agents)?;
+        let c = pointer::ensure_pointer_block_relative(&claude)?;
+        // Keep the global files updated too (absolute pointer).
+        let _ = pointer::ensure_pointer_block(&ctx.home_dir.join("AGENTS.md"));
+        let _ = pointer::ensure_pointer_block(&ctx.home_dir.join("CLAUDE.md"));
+        (agents, claude, a, c)
+    } else {
+        // Global fallback (home_dir): absolute pointer.
+        let agents = canonical_project.join("AGENTS.md");
+        let claude = canonical_project.join("CLAUDE.md");
+        let a = pointer::ensure_pointer_block(&agents)?;
+        let c = pointer::ensure_pointer_block(&claude)?;
+        (agents, claude, a, c)
+    };
 
     Ok(PublishOutcome {
         user_handoff,

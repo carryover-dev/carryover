@@ -19,7 +19,7 @@ use crate::daemon::hook_endpoint::LOOPBACK_PORT;
 /// Return the canonical curl stub command for a (tool, event) pair.
 pub fn curl_stub(tool: &str, event: &str) -> String {
     format!(
-        "curl -X POST -s -H 'Content-Type: application/json' -d '{{}}' http://127.0.0.1:{LOOPBACK_PORT}/hook/{tool}/{event} > /dev/null 2>&1 &"
+        "curl -X POST -s -H 'Content-Type: application/json' -d \"{{\\\"cwd\\\":\\\"$PWD\\\"}}\" http://127.0.0.1:{LOOPBACK_PORT}/hook/{tool}/{event} > /dev/null 2>&1 &"
     )
 }
 
@@ -214,9 +214,40 @@ pub fn cursor_wrapper_path(home: &Path, event: &str) -> std::path::PathBuf {
 }
 
 fn cursor_wrapper_script(tool: &str, event: &str) -> String {
-    format!(
-        "#!/usr/bin/env sh\nINPUT=$(cat)\ncurl -X POST -s -H 'Content-Type: application/json' \\\n  -d \"$INPUT\" http://127.0.0.1:{LOOPBACK_PORT}/hook/{tool}/{event} > /dev/null 2>&1\nprintf '{{}}'\n"
-    )
+    let curl = format!(
+        "curl -X POST -s -H 'Content-Type: application/json' \\\n  -d \"{{\\\"cwd\\\":\\\"$PWD\\\"}}\" http://127.0.0.1:{LOOPBACK_PORT}/hook/{tool}/{event} > /dev/null 2>&1 &"
+    );
+    match event {
+        "beforeSubmitPrompt" => format!(
+            "#!/usr/bin/env sh\n\
+             INPUT=$(cat)\n\
+             {curl}\n\
+             if [ -f \"$PWD/.carryover/handoff.md\" ]; then\n\
+             HANDOFF=\"$PWD/.carryover/handoff.md\"\n\
+             FLAG=\"$PWD/.carryover/cursor-injected\"\n\
+             else\n\
+             HANDOFF=\"$HOME/.carryover/handoff.md\"\n\
+             FLAG=\"$HOME/.carryover/cursor-injected\"\n\
+             fi\n\
+             if [ ! -f \"$FLAG\" ] && [ -f \"$HANDOFF\" ]; then\n\
+             touch \"$FLAG\"\n\
+             printf '{{\"context\":%s}}' \"$(python3 -c \"import json,sys; print(json.dumps(sys.stdin.read()),end='')\" < \"$HANDOFF\")\"\n\
+             else\n\
+             printf '{{}}'\n\
+             fi\n"
+        ),
+        "stop" => format!(
+            "#!/usr/bin/env sh\n\
+             INPUT=$(cat)\n\
+             {curl}\n\
+             rm -f \"$PWD/.carryover/cursor-injected\"\n\
+             rm -f \"$HOME/.carryover/cursor-injected\"\n\
+             printf '{{}}'\n"
+        ),
+        _ => format!(
+            "#!/usr/bin/env sh\nINPUT=$(cat)\n{curl}\nprintf '{{}}'\n"
+        ),
+    }
 }
 
 /// Write wrapper scripts for all Cursor hook events to `~/.carryover/hooks/`.
@@ -371,7 +402,7 @@ pub fn codex_wrapper_path(home: &Path) -> std::path::PathBuf {
 
 fn codex_wrapper_script() -> String {
     format!(
-        "#!/usr/bin/env sh\nINPUT=$(cat)\ncurl -X POST -s -H 'Content-Type: application/json' \\\n  -d \"$INPUT\" http://127.0.0.1:{LOOPBACK_PORT}/hook/codex/turnEnd > /dev/null 2>&1\n"
+        "#!/usr/bin/env sh\nINPUT=$(cat)\ncurl -X POST -s -H 'Content-Type: application/json' \\\n  -d \"{{\\\"cwd\\\":\\\"$PWD\\\"}}\" http://127.0.0.1:{LOOPBACK_PORT}/hook/codex/turnEnd > /dev/null 2>&1\n"
     )
 }
 
@@ -581,7 +612,7 @@ mod tests {
         let s = curl_stub("claude", "SessionStart");
         assert_eq!(
             s,
-            "curl -X POST -s -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:47823/hook/claude/SessionStart > /dev/null 2>&1 &"
+            "curl -X POST -s -H 'Content-Type: application/json' -d \"{\\\"cwd\\\":\\\"$PWD\\\"}\" http://127.0.0.1:47823/hook/claude/SessionStart > /dev/null 2>&1 &"
         );
     }
 
@@ -797,10 +828,22 @@ mod tests {
             prompt_content.contains("/hook/cursor/beforeSubmitPrompt"),
             "prompt script must POST to beforeSubmitPrompt endpoint"
         );
+        assert!(
+            prompt_content.contains("cursor-injected"),
+            "prompt script must use injection flag"
+        );
+        assert!(
+            prompt_content.contains("context"),
+            "prompt script must emit context field"
+        );
         let stop_content = std::fs::read_to_string(&stop_script).unwrap();
         assert!(
             stop_content.contains("/hook/cursor/stop"),
             "stop script must POST to stop endpoint"
+        );
+        assert!(
+            stop_content.contains("cursor-injected"),
+            "stop script must clear injection flag"
         );
         assert!(
             !p.exists(),

@@ -43,3 +43,4 @@ LAUNCH_CHECKLIST.md
 
 # Python bytecode caches under tests/
 __pycache__/
+.carryover/
