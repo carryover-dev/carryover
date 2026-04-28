@@ -20,7 +20,7 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 
@@ -28,7 +28,6 @@ mod tests {
     /// function returns Ok without panicking. Whether it returns true/false
     /// depends on the machine.
     #[test]
-    #[cfg(target_os = "linux")]
     fn stop_run_returns_ok() {
         // run() calls stop_only() which calls systemctl --user stop.
         // On a machine without a running carryoverd unit this still returns Ok.
