@@ -21,7 +21,7 @@ class Carryover < Formula
   desc "Zero-LLM-token context-handoff daemon — resume any AI session across Claude Code, Cursor, and Codex"
   homepage "https://github.com/carryover-dev/carryover"
   license "Apache-2.0"
-  version "0.1.1"
+  version "0.1.2"
 
   on_macos do
     on_arm do

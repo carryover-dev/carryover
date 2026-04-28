@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once v0.1.0 ships.
 
+## 0.1.2 — 2026-04-28
+
+### Fixed
+
+- Daemon now writes handoffs to the correct project directory on fs-watcher events (previously always wrote to `~/.carryover/`). Implemented `infer_project_dir_from_cursor` to decode Claude transcript path slugs back to the real project path.
+- Cursor re-seeding: detect stale session file (new Claude session UUID) and wrong-project cursor; re-seed to the newest transcript for the current project.
+- Task extractor: use the first substantial user prompt (≥10 chars, not a JSON array) instead of the last — captures original intent rather than trivial follow-ups.
+- Open-questions extractor: skip JSON-array user rows (skill injections were leaking into open questions).
+- Next-action extractor: return full last assistant response block instead of a single chopped sentence; handle JSON content arrays (Claude stores `message.content` as `[{type:text,…}]`).
+
+### Added
+
+- Append-only `.carryover/progress.md` per project: timestamped `[user]` and `[assistant]` entries accumulated across all ingests, never deleted. Includes a `## What to do next` footer updated on every ingest.
+- `## Progress log` section in `handoff.md` containing the full accumulated progress log.
+- Pointer block in `AGENTS.md` / `CLAUDE.md` updated to reference `## What to do next` and ask user before continuing.
+- Handoff line cap raised from 50 to 150.
+
 ## 0.1.1 — 2026-04-28
 
 ### Fixed
