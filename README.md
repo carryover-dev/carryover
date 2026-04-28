@@ -87,11 +87,11 @@ carryoverd install
 
 A single TUI question: *"Which AI agents do you use?"* — pre-checked with whatever Carryover detects on disk. Confirm and the daemon registers itself with systemd-user (on Linux), writes hook stubs into each tool's settings, and starts watching transcripts.
 
-**macOS:** launchd autostart is on the v0.2 roadmap. After `carryoverd install`, start the daemon manually in a separate terminal (or background it):
+**macOS:** launchd autostart is on the v0.2 roadmap. After `carryoverd install`, start the daemon manually:
 
 ```sh
-carryoverd          # keep this terminal open, or…
-carryoverd &        # …run in the background
+carryoverd start        # keep this terminal open, or…
+carryoverd start &      # …run it in the background
 ```
 
 ```sh
