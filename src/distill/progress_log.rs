@@ -22,7 +22,10 @@ fn extract_session_watermark(existing: &str) -> Option<&str> {
 fn strip_watermark(existing: &str) -> &str {
     let first_line = existing.lines().next().unwrap_or("");
     if first_line.starts_with(SESSION_WATERMARK_PREFIX) {
-        existing.find('\n').map(|pos| &existing[pos + 1..]).unwrap_or("")
+        existing
+            .find('\n')
+            .map(|pos| &existing[pos + 1..])
+            .unwrap_or("")
     } else {
         existing
     }
@@ -44,7 +47,10 @@ fn prev_session_summary(existing: &str) -> String {
     if task.is_empty() {
         format!("_Previous session ({date})_")
     } else {
-        format!("_Previous session ({date}): {}_", truncate_at_word(task, 80))
+        format!(
+            "_Previous session ({date}): {}_",
+            truncate_at_word(task, 80)
+        )
     }
 }
 
@@ -130,7 +136,12 @@ fn ms_to_iso(ts_ms: i64) -> String {
 ///
 /// Returns the complete `.carryover/progress.md` contents: header,
 /// entries (old + new, sorted), and a `## What to do next` footer.
-pub fn build_progress_log(existing: &str, new_entries: &[String], next_action: &str, session_id: &str) -> String {
+pub fn build_progress_log(
+    existing: &str,
+    new_entries: &[String],
+    next_action: &str,
+    session_id: &str,
+) -> String {
     // Detect whether we're in a new session.
     let stored_session = extract_session_watermark(existing);
     let is_new_session = match stored_session {

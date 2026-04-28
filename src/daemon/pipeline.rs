@@ -195,8 +195,13 @@ impl Pipeline {
         // Cache project_dir for the fs-watcher path: hook events have the real
         // cwd but watch events use session_id="default" and must look it up.
         if session_id != "default" {
-            let canonical_home = self.home_dir.canonicalize().unwrap_or_else(|_| self.home_dir.clone());
-            let canonical_project = project_dir.canonicalize().unwrap_or_else(|_| project_dir.to_path_buf());
+            let canonical_home = self
+                .home_dir
+                .canonicalize()
+                .unwrap_or_else(|_| self.home_dir.clone());
+            let canonical_project = project_dir
+                .canonicalize()
+                .unwrap_or_else(|_| project_dir.to_path_buf());
             if canonical_project != canonical_home {
                 let meta = serde_json::json!({
                     "project_dir": project_dir.to_string_lossy()
@@ -236,7 +241,12 @@ impl Pipeline {
         let progress_path = project_dir.join(".carryover").join("progress.md");
         let existing_progress = std::fs::read_to_string(&progress_path).unwrap_or_default();
         let new_entries = extract_progress_entries(new_rows);
-        let progress_log = build_progress_log(&existing_progress, &new_entries, &next_action, real_session_id);
+        let progress_log = build_progress_log(
+            &existing_progress,
+            &new_entries,
+            &next_action,
+            real_session_id,
+        );
 
         let distilled = Distilled {
             source_tool: tool.to_string(),
