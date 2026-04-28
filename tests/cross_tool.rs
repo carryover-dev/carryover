@@ -99,6 +99,7 @@ fn distill(rows: &[LedgerRow], source_tool: &str, cwd: Option<&Path>) -> Distill
         recent_files: extract_recent_files(rows),
         failed_approaches: extract_failed_approaches(rows),
         git_context: extract_git_context(rows, cwd),
+        progress_log: String::new(),
     }
 }
 

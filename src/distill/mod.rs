@@ -15,6 +15,7 @@ pub mod failed_approaches;
 pub mod git_context;
 pub mod next_action;
 pub mod open_questions;
+pub mod progress_log;
 pub mod recent_files;
 pub mod task;
 pub mod util;

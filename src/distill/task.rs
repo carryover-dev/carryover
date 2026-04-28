@@ -6,24 +6,34 @@ use crate::storage::LedgerRow;
 pub const MAX_TASK_CHARS: usize = 120;
 pub const NO_TASK_SENTINEL: &str = "<no task captured>";
 
-/// Extract a one-line summary of the user's current task from the latest
-/// substantial user turn in the ledger.
+/// Extract a one-line summary of the user's task from the session.
+///
+/// Uses the FIRST substantial user prompt (original intent of the session),
+/// not the most recent one — follow-up messages like "sure", "go on", or
+/// "anything" are poor task descriptions.
 ///
 /// Algorithm:
-/// 1. Iterate rows in reverse (newest first).
-/// 2. Find the most recent row with `role == "user"` whose `content.trim()` is
-///    non-empty.
+/// 1. Iterate rows in forward order (oldest first).
+/// 2. Find the first row with `role == "user"` whose plain-text content is
+///    non-empty and at least 10 characters (skip trivial follow-ups).
 /// 3. Take only the first non-empty line of that content.
-/// 4. If the line exceeds `MAX_TASK_CHARS`, truncate at the last word boundary
-///    before the cap and append `…`.
+/// 4. Truncate to `MAX_TASK_CHARS` at word boundary if needed.
 /// 5. Return the result, or `NO_TASK_SENTINEL` when no qualifying row exists.
 pub fn extract_task(rows: &[LedgerRow]) -> String {
-    for row in rows.iter().rev() {
+    for row in rows.iter() {
         if row.role != "user" {
             continue;
         }
         let trimmed = row.content.trim();
         if trimmed.is_empty() {
+            continue;
+        }
+        // Skip tool-result / skill-injection rows (JSON arrays).
+        if trimmed.starts_with('[') {
+            continue;
+        }
+        // Skip trivial follow-ups ("ok", "go on", "sure", "anything", etc.)
+        if trimmed.len() < 10 {
             continue;
         }
         // Take the first non-empty line.
@@ -60,13 +70,23 @@ mod tests {
     }
 
     #[test]
-    fn extracts_latest_user_prompt() {
+    fn extracts_first_substantial_user_prompt() {
         let rows = vec![
-            make_row("user", "first user message"),
+            make_row("user", "first substantial message here"),
             make_row("assistant", "some response"),
-            make_row("user", "second user message"),
+            make_row("user", "ok"),
         ];
-        assert_eq!(extract_task(&rows), "second user message");
+        assert_eq!(extract_task(&rows), "first substantial message here");
+    }
+
+    #[test]
+    fn skips_trivial_follow_ups() {
+        let rows = vec![
+            make_row("user", "ok"),
+            make_row("user", "sure"),
+            make_row("user", "build me a web app with auth"),
+        ];
+        assert_eq!(extract_task(&rows), "build me a web app with auth");
     }
 
     #[test]

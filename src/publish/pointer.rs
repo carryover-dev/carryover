@@ -23,9 +23,9 @@ pub fn pointer_block(handoff_path: &Path) -> String {
     format!(
         "<!--CARRYOVER:START-->\n\
          Carryover is active. Before responding:\n\
-         1. Read `{path_str}` for the prior session summary.\n\
-         2. Summarize it back to the user in 1-2 sentences.\n\
-         3. Ask what they want to do next — do not assume continuation.\n\
+         1. Read `{path_str}` for the full session context and progress log.\n\
+         2. Find the `## What to do next` section and read it aloud to the user in 1-2 sentences.\n\
+         3. Ask the user if they want to continue from there or do something different — do not assume continuation.\n\
          <!--CARRYOVER:END-->"
     )
 }

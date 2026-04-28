@@ -27,7 +27,7 @@
 
 ## What is Carryover?
 
-Carryover is a long-lived local daemon that captures AI agent context from on-disk transcripts and republishes a bounded, fifty-line handoff. Your agent stays focused across session boundaries, tool switches, and compaction events — whether you're shipping a feature, mapping a competitive landscape, or drafting an investor memo. The bookkeeping happens locally so the agent itself never has to do the work.
+Carryover is a long-lived local daemon that captures AI agent context from on-disk transcripts and republishes a structured handoff: task, open questions, next action, and a cumulative progress log. Your agent stays focused across session boundaries, tool switches, and compaction events — whether you're shipping a feature, mapping a competitive landscape, or drafting an investor memo. The bookkeeping happens locally so the agent itself never has to do the work.
 
 ## Why does this exist?
 
@@ -38,12 +38,12 @@ Carryover takes a different path. The state is already on disk. A local daemon r
 That gives Carryover three properties no competitor has at once:
 
 1. **Capture happens without burning context.** Hooks fire locally, the daemon reads transcripts directly, and the agent does no writing.
-2. **Restore is bounded.** A fifty-line handoff is the contract. Older state lives in the local SQLite ledger, not in the agent's prompt.
+2. **Restore is bounded.** A structured handoff (task, progress log, next action) is the contract. Older state lives in the local SQLite ledger, not in the agent's prompt.
 3. **It works across tools.** Claude Code, Cursor, Codex, Copilot, Windsurf, and Aider all converge on the same `AGENTS.md` rail.
 
 ## Architecture
 
-A long-lived user daemon (`carryoverd`) started by `launchd` or `systemd` watches each tool's transcript directory and exposes a local hook endpoint at `localhost:47823`. Captured state flows through a normalizer and a deterministic distiller (regex, AST via tree-sitter, git metadata) into a SQLite ledger at `~/.carryover/ledger.sqlite`, then out to a fifty-line handoff at `~/.carryover/handoff.md` and a bounded `[CARRYOVER]` block inside the project's `AGENTS.md`.
+A long-lived user daemon (`carryoverd`) started by `launchd` or `systemd` watches each tool's transcript directory and exposes a local hook endpoint at `localhost:47823`. Captured state flows through a normalizer and a deterministic distiller (regex, AST via tree-sitter, git metadata) into a SQLite ledger at `~/.carryover/ledger.sqlite`, then out to a structured handoff at `~/.carryover/handoff.md` and a `[CARRYOVER]` block inside the project's `AGENTS.md`.
 
 For the full design — including the confirmed transcript-location matrix, the per-tool hook event matrix, the restore paths, and the comparison against existing tools — see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
@@ -103,7 +103,7 @@ carryoverd uninstall   # remove hooks; ledger preserved by default (--purge to w
 | Capture from Claude Code (`~/.claude/projects/*.jsonl`) | ✅ |
 | Capture from Cursor (`state.vscdb` SQLite, with WAL-locked copy fallback) | ✅ |
 | Capture from Codex CLI (`~/.codex/sessions/*.jsonl`) | ✅ |
-| 50-line distilled handoff with task / open questions / next action / recent files / failed approaches / git context | ✅ |
+| Distilled handoff with task / open questions / next action / recent files / failed approaches / git context / progress log | ✅ |
 | Privacy-split dual-write (`.carryover/handoff.md` gitignored, fixed pointer block in `AGENTS.md` + `CLAUDE.md`) | ✅ |
 | Hook endpoint on `127.0.0.1:47823` (loopback only, DNS-rebinding guard, body size cap) | ✅ |
 | fs watcher backup signal (notify + debouncer) | ✅ |
