@@ -68,10 +68,6 @@ pub struct HookEvent {
     pub event: String,
     pub transcript_path: Option<PathBuf>,
     pub session_id: Option<String>,
-    /// Working directory of the AI tool process that fired the hook.
-    /// Used by the pipeline to write a per-project handoff alongside the
-    /// global `~/.carryover/handoff.md`.
-    pub cwd: Option<PathBuf>,
     /// Tool-specific extra metadata (kept opaque so the schema can grow per tool).
     #[serde(default, flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -83,7 +79,6 @@ pub struct HookEvent {
 pub struct HookPayload {
     pub transcript_path: Option<PathBuf>,
     pub session_id: Option<String>,
-    pub cwd: Option<PathBuf>,
     #[serde(default, flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -179,18 +174,11 @@ async fn hook_handler(
         other => other,
     };
 
-    // Validate cwd: must be absolute and contain no `..` components.
-    // An invalid cwd is silently dropped — the pipeline falls back to home_dir.
-    let cwd = payload.cwd.filter(|p| {
-        p.is_absolute() && !path_has_parent_component(p)
-    });
-
     let evt = HookEvent {
         tool,
         event,
         transcript_path,
         session_id: payload.session_id,
-        cwd,
         extra: payload.extra,
     };
     // UnboundedSender::send only fails when the receiver is dropped (channel closed).
@@ -305,7 +293,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hook_event_cwd_parsed_and_extra_fields_preserved() {
+    async fn hook_event_extra_fields_preserved() {
         let (app, mut rx) = make_router();
         app.oneshot(loopback_req(
             "POST",
@@ -316,24 +304,8 @@ mod tests {
         .unwrap();
 
         let evt = rx.try_recv().expect("hook event must be queued");
-        // cwd is now a first-class field, not in extra.
-        assert_eq!(evt.cwd, Some(PathBuf::from("/synthetic/path/1")));
+        assert_eq!(evt.extra.get("cwd").unwrap(), "/synthetic/path/1");
         assert_eq!(evt.extra.get("version").unwrap(), "2.0.0");
-    }
-
-    #[tokio::test]
-    async fn hook_event_cwd_with_traversal_is_dropped() {
-        let (app, mut rx) = make_router();
-        app.oneshot(loopback_req(
-            "POST",
-            "/hook/claude/PreCompact",
-            Body::from(r#"{"cwd": "/tmp/../etc"}"#),
-        ))
-        .await
-        .unwrap();
-
-        let evt = rx.try_recv().expect("hook event must be queued");
-        assert_eq!(evt.cwd, None, "traversal cwd should be dropped");
     }
 
     #[tokio::test]

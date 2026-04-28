@@ -1,6 +1,6 @@
 {
   "name": "carryover",
-  "version": "0.1.1",
+  "version": "0.1.0",
   "description": "Zero-LLM-token context-handoff daemon — resume any AI session across Claude Code, Cursor, and Codex.",
   "homepage": "https://github.com/carryover-dev/carryover",
   "repository": {

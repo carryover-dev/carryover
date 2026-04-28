@@ -17,6 +17,8 @@
 
 use std::path::{Path, PathBuf};
 
+use dirs;
+
 use carryover::adapters::{
     self, claude::ClaudeAdapter, codex::CodexAdapter, cursor::CursorAdapter, Adapter,
 };
@@ -182,8 +184,12 @@ fn run_pipeline(source_tool: &str) {
         extract_block(&claude),
         "{source_tool}: pointer block must be byte-identical across AGENTS.md and CLAUDE.md"
     );
-    // project != home → relative pointer in project files
-    let expected_block = pointer_block(std::path::Path::new(".carryover/handoff.md"));
+    let expected_block = pointer_block(
+        &dirs::home_dir()
+            .unwrap()
+            .join(".carryover")
+            .join("handoff.md"),
+    );
     assert_eq!(
         extract_block(&agents),
         expected_block,
