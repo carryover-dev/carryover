@@ -7,6 +7,53 @@ use crate::storage::LedgerRow;
 
 pub const MAX_ENTRY_CHARS: usize = 150;
 
+const SESSION_WATERMARK_PREFIX: &str = "<!-- session: ";
+const SESSION_WATERMARK_SUFFIX: &str = " -->";
+
+/// Return the session id stored in the watermark comment on line 1, or None.
+fn extract_session_watermark(existing: &str) -> Option<&str> {
+    let first_line = existing.lines().next()?;
+    first_line
+        .strip_prefix(SESSION_WATERMARK_PREFIX)?
+        .strip_suffix(SESSION_WATERMARK_SUFFIX)
+}
+
+/// Strip the watermark line (line 1) if present, returning the rest.
+fn strip_watermark(existing: &str) -> &str {
+    let first_line = existing.lines().next().unwrap_or("");
+    if first_line.starts_with(SESSION_WATERMARK_PREFIX) {
+        existing
+            .find('\n')
+            .map(|pos| &existing[pos + 1..])
+            .unwrap_or("")
+    } else {
+        existing
+    }
+}
+
+/// Build a one-liner summary of the previous session for use as a divider.
+fn prev_session_summary(existing: &str) -> String {
+    let stripped = strip_watermark(existing);
+    let date = stripped
+        .lines()
+        .find(|l| l.starts_with("- ["))
+        .and_then(|l| l.strip_prefix("- [").and_then(|s| s.split('T').next()))
+        .unwrap_or("unknown");
+    let task = stripped
+        .lines()
+        .find(|l| l.contains("] [user] "))
+        .and_then(|l| l.split("] [user] ").nth(1))
+        .unwrap_or("");
+    if task.is_empty() {
+        format!("_Previous session ({date})_")
+    } else {
+        format!(
+            "_Previous session ({date}): {}_",
+            truncate_at_word(task, 80)
+        )
+    }
+}
+
 /// Build one formatted progress entry per user/assistant turn in `rows`.
 ///
 /// Format: `- [ISO_TS] [role] first meaningful line of content`
@@ -89,24 +136,52 @@ fn ms_to_iso(ts_ms: i64) -> String {
 ///
 /// Returns the complete `.carryover/progress.md` contents: header,
 /// entries (old + new, sorted), and a `## What to do next` footer.
-pub fn build_progress_log(existing: &str, new_entries: &[String], next_action: &str) -> String {
-    // Split existing into the entries block and the trailing "What to do next" block.
-    let entries_block = if let Some(idx) = existing.find("\n## What to do next") {
-        existing[..idx].trim_end()
-    } else {
-        existing.trim_end()
+pub fn build_progress_log(
+    existing: &str,
+    new_entries: &[String],
+    next_action: &str,
+    session_id: &str,
+) -> String {
+    // Detect whether we're in a new session.
+    let stored_session = extract_session_watermark(existing);
+    let is_new_session = match stored_session {
+        Some(id) => id != session_id && !session_id.is_empty(),
+        None => false, // no watermark = legacy file, keep accumulating
     };
 
-    // Last logged timestamp (ISO string, lexicographically sortable).
-    let last_ts: Option<String> = entries_block
-        .lines()
-        .rev()
-        .filter(|l| l.starts_with("- ["))
-        .find_map(|l| {
-            l.strip_prefix("- [")
-                .and_then(|s| s.split(']').next())
-                .map(|s| s.to_string())
-        });
+    // Build the base entries block.
+    let base: String = if is_new_session {
+        format!(
+            "# Carryover Progress Log\n{}\n",
+            prev_session_summary(existing)
+        )
+    } else {
+        let stripped = strip_watermark(existing);
+        let entries_block = if let Some(idx) = stripped.find("\n## What to do next") {
+            stripped[..idx].trim_end()
+        } else {
+            stripped.trim_end()
+        };
+        if entries_block.is_empty() {
+            "# Carryover Progress Log\n".to_string()
+        } else {
+            format!("{entries_block}\n")
+        }
+    };
+
+    // Timestamp watermark for deduplication (only meaningful when same session).
+    let last_ts: Option<String> = if is_new_session {
+        None
+    } else {
+        base.lines()
+            .rev()
+            .filter(|l| l.starts_with("- ["))
+            .find_map(|l| {
+                l.strip_prefix("- [")
+                    .and_then(|s| s.split(']').next())
+                    .map(|s| s.to_string())
+            })
+    };
 
     // Only append entries newer than the watermark.
     let to_append: Vec<&str> = new_entries
@@ -124,17 +199,13 @@ pub fn build_progress_log(existing: &str, new_entries: &[String], next_action: &
         .map(|s| s.as_str())
         .collect();
 
-    let mut out = if entries_block.is_empty() {
-        "# Carryover Progress Log\n".to_string()
-    } else {
-        format!("{entries_block}\n")
-    };
-
+    // Prepend the session watermark so the next call can detect session changes.
+    let watermark = format!("{SESSION_WATERMARK_PREFIX}{session_id}{SESSION_WATERMARK_SUFFIX}\n");
+    let mut out = format!("{watermark}{base}");
     for entry in &to_append {
         out.push_str(entry);
         out.push('\n');
     }
-
     out.push_str("\n## What to do next\n");
     out.push_str(next_action.trim());
     out.push('\n');
@@ -203,7 +274,7 @@ mod tests {
             "- [2026-04-28T12:30:00Z] [user] first".to_string(), // duplicate
             "- [2026-04-28T12:31:00Z] [assistant] second".to_string(),
         ];
-        let log = build_progress_log(existing, &new_entries, "next step");
+        let log = build_progress_log(existing, &new_entries, "next step", "test-session");
         let count = log.lines().filter(|l| l.starts_with("- [")).count();
         assert_eq!(
             count, 2,
@@ -213,15 +284,15 @@ mod tests {
 
     #[test]
     fn appends_what_to_do_next() {
-        let log = build_progress_log("", &[], "run cargo test");
+        let log = build_progress_log("", &[], "run cargo test", "test-session");
         assert!(log.contains("## What to do next\nrun cargo test"));
     }
 
     #[test]
     fn updates_what_to_do_next_on_rebuild() {
-        let first = build_progress_log("", &[], "do A");
+        let first = build_progress_log("", &[], "do A", "test-session");
         let new_entries = vec!["- [2026-04-28T13:00:00Z] [user] another prompt".to_string()];
-        let second = build_progress_log(&first, &new_entries, "do B");
+        let second = build_progress_log(&first, &new_entries, "do B", "test-session");
         assert!(second.contains("do B"), "next should be updated");
         assert!(!second.contains("do A"), "old next should be gone");
     }

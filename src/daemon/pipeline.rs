@@ -192,6 +192,25 @@ impl Pipeline {
         self.ledger
             .save_cursor(tool, session_id, &new_cursor_json)?;
 
+        // Cache project_dir for the fs-watcher path: hook events have the real
+        // cwd but watch events use session_id="default" and must look it up.
+        if session_id != "default" {
+            let canonical_home = self
+                .home_dir
+                .canonicalize()
+                .unwrap_or_else(|_| self.home_dir.clone());
+            let canonical_project = project_dir
+                .canonicalize()
+                .unwrap_or_else(|_| project_dir.to_path_buf());
+            if canonical_project != canonical_home {
+                let meta = serde_json::json!({
+                    "project_dir": project_dir.to_string_lossy()
+                })
+                .to_string();
+                let _ = self.ledger.save_cursor(tool, "default", &meta);
+            }
+        }
+
         self.distill_and_publish(tool, session_id, &rows, project_dir)?;
         Ok(())
     }
@@ -222,7 +241,12 @@ impl Pipeline {
         let progress_path = project_dir.join(".carryover").join("progress.md");
         let existing_progress = std::fs::read_to_string(&progress_path).unwrap_or_default();
         let new_entries = extract_progress_entries(new_rows);
-        let progress_log = build_progress_log(&existing_progress, &new_entries, &next_action);
+        let progress_log = build_progress_log(
+            &existing_progress,
+            &new_entries,
+            &next_action,
+            real_session_id,
+        );
 
         let distilled = Distilled {
             source_tool: tool.to_string(),
@@ -309,11 +333,19 @@ fn infer_project_dir_from_cursor(ledger: &Ledger, tool: &str, home_dir: &Path) -
         return None;
     }
     let v: serde_json::Value = serde_json::from_str(&cursor_json).ok()?;
+
+    // Fast path: hook events write an explicit project_dir into this cursor.
+    if let Some(dir_str) = v.get("project_dir").and_then(|d| d.as_str()) {
+        let candidate = PathBuf::from(dir_str);
+        if candidate.is_dir() && candidate != home_dir {
+            return Some(candidate);
+        }
+    }
+
+    // Slow path: decode project dir from the Claude transcript slug.
     let file_path = v.get("file_path")?.as_str()?;
     let path = Path::new(file_path);
-    // Parent dir is the per-project subdir inside ~/.claude/projects/
     let slug = path.parent()?.file_name()?.to_string_lossy();
-    // Slug starts with `-` (leading `/` encoded); decode by replacing `-` → `/`.
     let decoded = slug.replace('-', "/");
     let candidate = PathBuf::from(&decoded);
     if candidate.is_dir() && candidate != home_dir {
