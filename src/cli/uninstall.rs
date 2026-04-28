@@ -61,6 +61,21 @@ pub fn run(purge: bool) -> Result<()> {
         );
     }
 
+    #[cfg(target_os = "linux")]
+    {
+        use crate::install::systemd;
+        match systemd::disable_and_stop() {
+            Ok(true) => println!("Daemon disabled and stopped via systemctl --user."),
+            Ok(false) => eprintln!("systemctl not available; daemon shutdown skipped."),
+            Err(e) => eprintln!("Could not disable/stop daemon: {e}"),
+        }
+        match systemd::remove_unit_file() {
+            Ok(true) => println!("Removed systemd unit file."),
+            Ok(false) => println!("systemd unit file already absent."),
+            Err(e) => eprintln!("Could not remove systemd unit file: {e}"),
+        }
+    }
+
     // Always remove config.json — its absence is the "not installed" signal.
     if cfg_path.exists() {
         std::fs::remove_file(&cfg_path)
@@ -104,7 +119,6 @@ pub fn run(purge: bool) -> Result<()> {
         }
     }
 
-    println!("Daemon registration removal: not yet implemented (lands with the systemd unit PR)");
     Ok(())
 }
 
