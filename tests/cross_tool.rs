@@ -17,6 +17,8 @@
 
 use std::path::{Path, PathBuf};
 
+use dirs;
+
 use carryover::adapters::{
     self, claude::ClaudeAdapter, codex::CodexAdapter, cursor::CursorAdapter, Adapter,
 };
@@ -26,7 +28,7 @@ use carryover::distill::{
     recent_files::extract_recent_files, task::extract_task,
 };
 use carryover::publish::{
-    publish, Distilled, PublishContext, POINTER_BLOCK, POINTER_END, POINTER_START,
+    pointer_block, publish, Distilled, PublishContext, POINTER_END, POINTER_START,
 };
 use carryover::storage::{Ledger, LedgerRow};
 
@@ -182,10 +184,16 @@ fn run_pipeline(source_tool: &str) {
         extract_block(&claude),
         "{source_tool}: pointer block must be byte-identical across AGENTS.md and CLAUDE.md"
     );
+    let expected_block = pointer_block(
+        &dirs::home_dir()
+            .unwrap()
+            .join(".carryover")
+            .join("handoff.md"),
+    );
     assert_eq!(
         extract_block(&agents),
-        POINTER_BLOCK,
-        "{source_tool}: pointer block must match the constant"
+        expected_block,
+        "{source_tool}: pointer block must match pointer_block() output"
     );
 
     // 8d. .gitignore covers .carryover/.

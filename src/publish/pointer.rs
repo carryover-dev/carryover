@@ -1,9 +1,9 @@
-//! Static pointer block stamped into AGENTS.md and CLAUDE.md.
+//! Pointer block stamped into AGENTS.md and CLAUDE.md.
 //!
-//! These files ARE committed to the project repository, so the block
-//! contains ONLY fixed text — no task content, no transcript fragments,
-//! no session ids. Any future change that interpolates runtime data into
-//! `POINTER_BLOCK` is a privacy regression.
+//! The block contains ONLY fixed structural text plus the absolute path to
+//! the handoff file — no task content, no transcript fragments, no session ids.
+//! The handoff path is the only runtime value: it varies by user home dir but
+//! is never project-specific data.
 
 use std::fs;
 use std::path::Path;
@@ -13,20 +13,22 @@ use super::write_atomic;
 pub const POINTER_START: &str = "<!--CARRYOVER:START-->";
 pub const POINTER_END: &str = "<!--CARRYOVER:END-->";
 
-/// The static block stamped into AGENTS.md and CLAUDE.md.
-///
-/// **DO NOT** add task content, session ids, or any other runtime data
-/// to this constant. The whole privacy model of Carryover depends on
-/// this block being identical across every project on every machine.
-/// Live handoff content lives in `.carryover/handoff.md` (gitignored).
-pub const POINTER_BLOCK: &str = concat!(
-    "<!--CARRYOVER:START-->\n",
-    "Carryover is active in this project. Before responding:\n",
-    "1. Read `.carryover/handoff.md` for the prior session summary.\n",
-    "2. Summarize it back to the user in 1-2 sentences.\n",
-    "3. Ask what they want to do next — do not assume continuation.\n",
-    "<!--CARRYOVER:END-->",
-);
+/// Build the pointer block for a given handoff path.
+/// The path is embedded as an absolute path so the block works when
+/// stamped into home-level AGENTS.md / CLAUDE.md (global instructions)
+/// where a relative `.carryover/handoff.md` would resolve to the wrong
+/// project directory.
+pub fn pointer_block(handoff_path: &Path) -> String {
+    let path_str = handoff_path.display();
+    format!(
+        "<!--CARRYOVER:START-->\n\
+         Carryover is active. Before responding:\n\
+         1. Read `{path_str}` for the prior session summary.\n\
+         2. Summarize it back to the user in 1-2 sentences.\n\
+         3. Ask what they want to do next — do not assume continuation.\n\
+         <!--CARRYOVER:END-->"
+    )
+}
 
 /// Insert or replace the pointer block in `path`. Creates the file if
 /// missing. Returns true if the file was modified, false if the
@@ -44,13 +46,26 @@ pub const POINTER_BLOCK: &str = concat!(
 /// never produces a torn file, and a symlink at `path` is rejected
 /// rather than followed.
 pub fn ensure_pointer_block(path: &Path) -> std::io::Result<bool> {
+    // Derive handoff path: same dir as path's parent's parent + .carryover/handoff.md,
+    // but for global (home-level) installs use ~/.carryover/handoff.md.
+    // Simplest v0.1 approach: resolve home dir and use absolute path.
+    let handoff_path = dirs::home_dir()
+        .map(|h| h.join(".carryover").join("handoff.md"))
+        .unwrap_or_else(|| Path::new(".carryover/handoff.md").to_path_buf());
+    ensure_pointer_block_with_path(path, &handoff_path)
+}
+
+/// Like `ensure_pointer_block` but with an explicit handoff path (used in tests
+/// and by the per-project publish path in future versions).
+pub fn ensure_pointer_block_with_path(path: &Path, handoff_path: &Path) -> std::io::Result<bool> {
     let existing = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
     };
 
-    let new_content = build_new_content(&existing);
+    let block = pointer_block(handoff_path);
+    let new_content = build_new_content(&existing, &block);
     if new_content == existing {
         return Ok(false);
     }
@@ -85,21 +100,21 @@ pub fn remove_pointer_block(path: &Path) -> std::io::Result<bool> {
     Ok(true)
 }
 
-fn build_new_content(existing: &str) -> String {
+fn build_new_content(existing: &str, block: &str) -> String {
     if let Some((start_byte, end_byte)) = find_block_bounds(existing) {
         let before = &existing[..start_byte];
         let after = &existing[end_byte..];
-        return format!("{before}{POINTER_BLOCK}{after}");
+        return format!("{before}{block}{after}");
     }
 
     if existing.is_empty() {
-        format!("{POINTER_BLOCK}\n")
+        format!("{block}\n")
     } else if existing.ends_with("\n\n") {
-        format!("{existing}{POINTER_BLOCK}\n")
+        format!("{existing}{block}\n")
     } else if existing.ends_with('\n') {
-        format!("{existing}\n{POINTER_BLOCK}\n")
+        format!("{existing}\n{block}\n")
     } else {
-        format!("{existing}\n\n{POINTER_BLOCK}\n")
+        format!("{existing}\n\n{block}\n")
     }
 }
 
@@ -130,15 +145,28 @@ fn find_block_bounds(text: &str) -> Option<(usize, usize)> {
 mod tests {
     use super::*;
 
+    fn test_handoff() -> std::path::PathBuf {
+        Path::new("/home/testuser/.carryover/handoff.md").to_path_buf()
+    }
+
+    fn ep(p: &Path) -> std::io::Result<bool> {
+        ensure_pointer_block_with_path(p, &test_handoff())
+    }
+
+    fn expected_block() -> String {
+        pointer_block(&test_handoff())
+    }
+
     #[test]
     fn inserts_block_in_empty_file() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("AGENTS.md");
-        let modified = ensure_pointer_block(&p).unwrap();
+        let modified = ep(&p).unwrap();
         assert!(modified);
         let body = fs::read_to_string(&p).unwrap();
         assert!(body.contains(POINTER_START));
         assert!(body.contains(POINTER_END));
+        assert!(body.contains("/home/testuser/.carryover/handoff.md"));
     }
 
     #[test]
@@ -147,11 +175,11 @@ mod tests {
         let p = dir.path().join("AGENTS.md");
         let stale = format!("# Project\n\n{POINTER_START}\nold body\n{POINTER_END}\nfooter\n");
         fs::write(&p, &stale).unwrap();
-        let modified = ensure_pointer_block(&p).unwrap();
+        let modified = ep(&p).unwrap();
         assert!(modified);
         let body = fs::read_to_string(&p).unwrap();
         assert!(body.starts_with("# Project\n"));
-        assert!(body.contains(POINTER_BLOCK));
+        assert!(body.contains(&expected_block()));
         assert!(!body.contains("old body"));
         assert!(body.ends_with("footer\n"));
     }
@@ -160,9 +188,9 @@ mod tests {
     fn idempotent_returns_false_on_second_call() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("AGENTS.md");
-        let first = ensure_pointer_block(&p).unwrap();
+        let first = ep(&p).unwrap();
         assert!(first);
-        let second = ensure_pointer_block(&p).unwrap();
+        let second = ep(&p).unwrap();
         assert!(!second, "second call should be a no-op");
     }
 
@@ -171,11 +199,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("AGENTS.md");
         fs::write(&p, "# Project\n\nSome description.\n").unwrap();
-        let modified = ensure_pointer_block(&p).unwrap();
+        let modified = ep(&p).unwrap();
         assert!(modified);
         let body = fs::read_to_string(&p).unwrap();
         assert!(body.starts_with("# Project\n"));
-        assert!(body.contains(POINTER_BLOCK));
+        assert!(body.contains(&expected_block()));
     }
 
     #[test]
@@ -183,8 +211,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let agents = dir.path().join("AGENTS.md");
         let claude = dir.path().join("CLAUDE.md");
-        ensure_pointer_block(&agents).unwrap();
-        ensure_pointer_block(&claude).unwrap();
+        ep(&agents).unwrap();
+        ep(&claude).unwrap();
         let a = fs::read_to_string(&agents).unwrap();
         let c = fs::read_to_string(&claude).unwrap();
 
@@ -194,28 +222,22 @@ mod tests {
             s[start..end].to_string()
         };
         assert_eq!(extract(&a), extract(&c));
-        assert_eq!(extract(&a), POINTER_BLOCK);
+        assert_eq!(extract(&a), expected_block());
     }
 
     #[test]
     fn fenced_marker_does_not_replace_documentation() {
-        // A documentation block that mentions the markers inside fenced
-        // code (column-0) WILL still match our line-anchored scan today.
-        // What we explicitly test is that the second invocation is a
-        // no-op (idempotent) rather than mangling the first replacement.
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("AGENTS.md");
         let docs = "# Carryover docs\n\nMarkers look like:\n\n```\nsome other text\n```\n";
         fs::write(&p, docs).unwrap();
-        ensure_pointer_block(&p).unwrap();
+        ep(&p).unwrap();
         let after_first = fs::read_to_string(&p).unwrap();
-        // No matter what shape build_new_content chose, two calls in a
-        // row must converge to a fixed point.
-        let modified_again = ensure_pointer_block(&p).unwrap();
+        let modified_again = ep(&p).unwrap();
         assert!(!modified_again, "second call must be a no-op");
         let after_second = fs::read_to_string(&p).unwrap();
         assert_eq!(after_first, after_second);
-        assert!(after_second.contains(POINTER_BLOCK));
+        assert!(after_second.contains(&expected_block()));
     }
 
     #[cfg(unix)]

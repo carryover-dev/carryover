@@ -21,7 +21,7 @@ mod write_atomic;
 
 pub use handoff::{render_handoff, Distilled, MAX_HANDOFF_LINES};
 pub use pointer::{
-    ensure_pointer_block, remove_pointer_block, POINTER_BLOCK, POINTER_END, POINTER_START,
+    ensure_pointer_block, pointer_block, remove_pointer_block, POINTER_END, POINTER_START,
 };
 
 use std::path::{Path, PathBuf};
