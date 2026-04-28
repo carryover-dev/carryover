@@ -17,7 +17,13 @@
 
 ---
 
-**Status: alpha — design docs only, not production ready.** No binaries are shipped yet. The repository today contains the architecture, vision, and roadmap for the v0.1 daemon.
+**Status: alpha — v0.1.0 in pre-release.**
+
+<p align="center">
+  <img src="docs/media/cross-tool-demo.gif" alt="60-second cross-tool resume demo" width="720" />
+</p>
+
+<p align="center"><sub>Demo recorded on macOS at v0.1.0 ship; placeholder until then.</sub></p>
 
 ## What is Carryover?
 
@@ -41,20 +47,96 @@ A long-lived user daemon (`carryoverd`) started by `launchd` or `systemd` watche
 
 For the full design — including the confirmed transcript-location matrix, the per-tool hook event matrix, the restore paths, and the comparison against existing tools — see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
-## Quickstart
+## Install
 
-Carryover is pre-code. There is no binary to install yet. The shipping plan is:
+Pick whichever fits your stack. All three install commands result in the same `carryoverd` binary on your `$PATH`.
 
-- Homebrew tap (`brew install carryover`) for macOS and Linux.
-- npm global binary (`npm install -g carryover`) as a fallback.
-- A one-shot `carryover init` that writes hook stubs into each detected tool's settings file.
+### Linux
 
-For now, the right entry points are:
+```sh
+# npm — works for any tool whose users already have Node installed
+npm install -g carryover
 
-- Read [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the design.
-- Read [`VISION.md`](./VISION.md) for the thesis.
-- Read [`ROADMAP.md`](./ROADMAP.md) for what ships when.
-- Watch the repository for the v0.1.0 release.
+# OR Cargo — for Rust developers who already have it
+cargo install carryover
+```
+
+### macOS
+
+The Homebrew tap ships shortly after the v0.1.0 Linux release. Until then, npm works on macOS:
+
+```sh
+npm install -g carryover
+```
+
+```sh
+# After the tap publishes:
+brew install carryover-dev/tap/carryover
+```
+
+> **macOS first-run note** — v0.1 binaries are signed with [cosign](https://github.com/sigstore/cosign) (free, transparent, open-source) but **not** with an Apple Developer ID. Gatekeeper may refuse to launch on first run. Strip the quarantine attribute once after install:
+>
+> ```sh
+> xattr -d com.apple.quarantine $(which carryoverd)
+> ```
+>
+> Apple Developer ID notarization is on the v1.0 roadmap — we accept the one-time `xattr` step in exchange for keeping the project free and signed via a public, transparent log. If you install via npm on macOS the postinstall script prints this same advisory automatically.
+
+### Then run the one-time setup
+
+```sh
+carryoverd install
+```
+
+A single TUI question: *"Which AI agents do you use?"* — pre-checked with whatever Carryover detects on disk. Confirm and the daemon registers itself with systemd-user (on Linux), writes hook stubs into each tool's settings, and starts watching transcripts. macOS launchd registration ships with the Homebrew tap.
+
+```sh
+carryoverd status      # see what's installed and recent events
+carryoverd refresh     # re-detect tools after a tool upgrade
+carryoverd uninstall   # remove hooks; ledger preserved by default (--purge to wipe)
+```
+
+## What works in v0.1
+
+| Feature | Status |
+|---|---|
+| Capture from Claude Code (`~/.claude/projects/*.jsonl`) | ✅ |
+| Capture from Cursor (`state.vscdb` SQLite, with WAL-locked copy fallback) | ✅ |
+| Capture from Codex CLI (`~/.codex/sessions/*.jsonl`) | ✅ |
+| 50-line distilled handoff with task / open questions / next action / recent files / failed approaches / git context | ✅ |
+| Privacy-split dual-write (`.carryover/handoff.md` gitignored, fixed pointer block in `AGENTS.md` + `CLAUDE.md`) | ✅ |
+| Hook endpoint on `127.0.0.1:47823` (loopback only, DNS-rebinding guard, body size cap) | ✅ |
+| fs watcher backup signal (notify + debouncer) | ✅ |
+| Linux daemon registration via systemd-user | ✅ |
+| macOS daemon registration via launchd | shipping with the Homebrew tap |
+| Cross-tool integration test (Claude → Cursor / Cursor → Codex / Codex → Cursor / Claude → Codex) | ✅ |
+| `cosign verify-blob` keyless signing on every release artifact | ✅ |
+
+## What's deferred to v0.2+
+
+- Aider, Copilot, Windsurf, Gemini CLI adapters (v0.2)
+- `brief` and `silent` resume modes — v0.1 ships only `ask` (v0.3)
+- Encryption-at-rest on the SQLite ledger (v0.5)
+- Apple Developer ID + notarization (v1.0 — until then, `xattr` is the workaround)
+- Windows support
+- Team-shared / sync features
+- GUI
+
+## Verification
+
+Every release artifact is signed with cosign keyless OIDC tied to **this exact workflow path** in this repository. To verify a downloaded tarball:
+
+```sh
+# Replace <ASSET> with the tarball name, e.g. carryoverd-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
+cosign verify-blob \
+  --certificate "<ASSET>.pem" \
+  --signature "<ASSET>.sig" \
+  --certificate-identity-regexp "^https://github.com/carryover-dev/carryover/.github/workflows/release\.yml@refs/tags/v.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "<ASSET>"
+```
+
+`SHA256SUMS` covers every tarball on the release page; `npm install -g carryover` enforces this hash automatically and refuses to install a mismatched binary.
 
 ## Where to get help
 

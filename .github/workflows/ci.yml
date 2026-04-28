@@ -41,4 +41,11 @@ jobs:
       - name: test
         run: cargo test --all-features --no-fail-fast
 
-      # detect_paths.sh ships in Phase 2 TASK-03; re-add this step there.
+      # README must keep the macOS Gatekeeper workaround documented; if a
+      # future doc rewrite drops it, fail the build so the regression is
+      # loud instead of silently leaving Mac users staring at a Gatekeeper
+      # dialog with no instructions.
+      - name: README has macOS xattr workaround
+        run: grep -q "xattr -d com.apple.quarantine" README.md
+
+      # detect_paths.sh ships in a follow-up; re-add this step there.
