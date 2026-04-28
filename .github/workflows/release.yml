@@ -97,15 +97,15 @@ jobs:
 
   build-macos:
     name: Build (${{ matrix.target }})
-    runs-on: ${{ matrix.runner }}
+    # macos-13 is GitHub-deprecated with unreliable runner availability.
+    # Both targets build on macos-14 (arm64); x86_64 is a cross-compile.
+    runs-on: macos-14
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: aarch64-apple-darwin
-            runner: macos-14
           - target: x86_64-apple-darwin
-            runner: macos-13
     permissions:
       contents: read
 
