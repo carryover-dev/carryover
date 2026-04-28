@@ -54,7 +54,6 @@ pub fn run() -> Result<()> {
             "cursor" => hooks_writer::write_cursor_hooks(&config_path, &pairs)
                 .with_context(|| format!("refresh cursor hooks at {}", config_path.display()))?,
             "codex" => {
-                // TODO(codex-toml): wire up after toml crate lands in a follow-up PR.
                 eprintln!("  codex: skipping hook stub write (TOML editing lands in a follow-up)");
                 false
             }

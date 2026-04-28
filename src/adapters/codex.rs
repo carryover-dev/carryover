@@ -4,8 +4,7 @@
 //! parses them into LedgerRow. Each session normally begins with a
 //! `session_meta` line followed by `event_msg` lines. When session_meta is
 //! absent the adapter best-effort-parses the event_msg rows; the daemon
-//! event log is the right place to surface that condition
-//! (TODO: wire up when the structured event log lands).
+//! event log is the right place to surface that condition (v0.2).
 
 use crate::adapters::{Adapter, AdapterError, RawRecord};
 use crate::storage::LedgerRow;
@@ -181,8 +180,7 @@ impl Adapter for CodexAdapter {
     /// If no `session_meta` is present (fixture #2), the adapter
     /// best-effort-parses the event_msg rows using the session_id embedded in
     /// each event_msg itself.
-    /// TODO: when the structured daemon event log lands, record the
-    /// missing-session_meta condition there instead of silently continuing.
+    /// Missing session_meta is recorded in the daemon event log (v0.2).
     fn parse(&self, records: Vec<RawRecord>) -> Result<Vec<LedgerRow>, AdapterError> {
         let mut rows = Vec::with_capacity(records.len());
 

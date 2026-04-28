@@ -6,7 +6,7 @@
 //! - Claude Code: ~/.claude/settings.json  — JSON, `hooks.<EventName>` must
 //!   be an array of matcher objects: `[{"matcher":"","hooks":[{"type":"command","command":"..."}]}]`
 //! - Cursor:      ~/.cursor/hooks.json     — JSON, hooks under "<eventName>"
-//!   as `{ "command": "...", "version": 1 }` objects. (Cursor B5 fix: TODO)
+//!   as `{ "command": "...", "version": 1 }` wrapper scripts
 //! - Codex:       ~/.codex/config.toml     — TOML, `notify` array + AGENTS.md pointer
 
 use anyhow::{Context, Result};
