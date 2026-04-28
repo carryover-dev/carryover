@@ -116,6 +116,53 @@ impl Pipeline {
                 .unwrap_or_default()
         };
 
+        // For Claude: ensure the cursor points to THIS project's CURRENT transcript.
+        // All hook events share session_id="default", so the cursor may point to:
+        //   (a) a different project's file, or
+        //   (b) the right project but a stale session file (new session = new UUID file).
+        // Re-seed whenever either condition is true.
+        let cursor_json = if tool == "claude" {
+            let canonical_home = self.home_dir.canonicalize().unwrap_or_else(|_| self.home_dir.clone());
+            let canonical_project = project_dir.canonicalize().unwrap_or_else(|_| project_dir.to_path_buf());
+            if canonical_project != canonical_home {
+                let expected_slug = canonical_project.to_string_lossy().replace('/', "-");
+                let newest = find_claude_project_transcript(&self.home_dir, project_dir);
+                let needs_reseed = if cursor_json.is_empty() {
+                    true
+                } else {
+                    let cursor_fp = serde_json::from_str::<serde_json::Value>(&cursor_json)
+                        .ok()
+                        .and_then(|v| v.get("file_path").and_then(|f| f.as_str()).map(|s| s.to_string()));
+                    match (cursor_fp, &newest) {
+                        // Wrong project
+                        (Some(fp), _) if !fp.contains(&*expected_slug) => true,
+                        // Right project but stale file (newer transcript exists)
+                        (Some(fp), Some(newest_path)) if fp != newest_path.to_string_lossy().as_ref() => true,
+                        // No cursor at all
+                        (None, _) => true,
+                        _ => false,
+                    }
+                };
+                if needs_reseed {
+                    if let Some(transcript) = newest {
+                        serde_json::json!({
+                            "file_path": transcript.to_string_lossy(),
+                            "byte_offset": 0,
+                            "last_uuid": null
+                        }).to_string()
+                    } else {
+                        cursor_json
+                    }
+                } else {
+                    cursor_json
+                }
+            } else {
+                cursor_json
+            }
+        } else {
+            cursor_json
+        };
+
         let (raw_records, new_cursor_json) = adapter.read_new_records_erased(&cursor_json)?;
         if raw_records.is_empty() {
             return Ok(());
@@ -134,9 +181,18 @@ impl Pipeline {
         &self,
         tool: &str,
         session_id: &str,
-        rows: &[LedgerRow],
+        new_rows: &[LedgerRow],
         project_dir: &Path,
     ) -> Result<()> {
+        // Distill from the full session history so that task/next_action
+        // reflect the complete conversation, not just the latest ingest batch.
+        let real_session_id = new_rows
+            .first()
+            .map(|r| r.session_id.as_str())
+            .unwrap_or(session_id);
+        let all_rows = self.ledger.query_session(real_session_id)?;
+        let rows = if all_rows.is_empty() { new_rows } else { &all_rows };
+
         let distilled = Distilled {
             source_tool: tool.to_string(),
             session_id: session_id.to_string(),
@@ -174,6 +230,36 @@ impl Pipeline {
             .open(&self.events_log)
             .and_then(|mut f| f.write_all(line.as_bytes()));
     }
+}
+
+/// Find the newest Claude transcript for a specific project directory.
+/// Claude encodes project paths as the full path with '/' replaced by '-'.
+/// Returns the newest .jsonl in that project subdir, or None if not found.
+fn find_claude_project_transcript(home_dir: &Path, project_dir: &Path) -> Option<PathBuf> {
+    let projects_root = home_dir.join(".claude").join("projects");
+    // Encode: "/home/rohit/workspace/test-web" → "-home-rohit-workspace-test-web"
+    let encoded = project_dir
+        .to_string_lossy()
+        .replace('/', "-");
+    let project_subdir = projects_root.join(&encoded);
+    if !project_subdir.is_dir() {
+        return None;
+    }
+    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
+    for entry in std::fs::read_dir(&project_subdir).ok()?.flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        if let Ok(meta) = p.metadata() {
+            if let Ok(modified) = meta.modified() {
+                if newest.as_ref().map(|(t, _)| modified > *t).unwrap_or(true) {
+                    newest = Some((modified, p));
+                }
+            }
+        }
+    }
+    newest.map(|(_, p)| p)
 }
 
 fn build_adapter_map(tools: &[String]) -> HashMap<String, AdapterKind> {

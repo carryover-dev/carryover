@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const MAX_HANDOFF_LINES: usize = 50;
+pub const MAX_HANDOFF_LINES: usize = 150;
 
 /// All extractor outputs assembled into one input for the publisher.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -92,10 +92,10 @@ pub fn render_handoff(d: &Distilled, resume_mode: &str) -> String {
         lines.push(String::new());
     }
 
-    // Hard cap. We collect lines first, then truncate.
+    // Soft cap. We collect lines first, then truncate.
     if lines.len() > MAX_HANDOFF_LINES {
         lines.truncate(MAX_HANDOFF_LINES - 1);
-        lines.push("…(truncated to 50 lines)".to_string());
+        lines.push("…(truncated)".to_string());
     }
 
     let mut out = lines.join("\n");
@@ -143,9 +143,9 @@ mod tests {
     }
 
     #[test]
-    fn truncates_to_50_lines() {
+    fn truncates_to_max_lines() {
         let mut d = base();
-        d.open_questions = (0..200).map(|i| format!("question {i}")).collect();
+        d.open_questions = (0..500).map(|i| format!("question {i}")).collect();
         let out = render_handoff(&d, "ask");
         let line_count = out.lines().count();
         assert!(

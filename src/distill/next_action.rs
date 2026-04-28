@@ -3,8 +3,9 @@
 
 use super::util::truncate_at_word;
 use crate::storage::LedgerRow;
+use serde_json;
 
-pub const MAX_NEXT_ACTION_CHARS: usize = 120;
+pub const MAX_NEXT_ACTION_CHARS: usize = 2000;
 pub const NO_NEXT_ACTION_SENTINEL: &str = "<no next action captured>";
 
 /// Extract the final actionable sentence from the latest assistant turn.
@@ -30,19 +31,49 @@ pub fn extract_next_action(rows: &[LedgerRow]) -> String {
             continue;
         }
 
-        let stripped = strip_code_fences(trimmed);
-        let cleaned = strip_bullet_prefixes(&stripped);
-        let text = cleaned.trim();
+        // Content may be a JSON array (Claude stores message.content as an array
+        // of blocks). Extract text blocks; skip if there are none (tool-only turns).
+        let prose: String;
+        let text_input = if trimmed.starts_with('[') {
+            match extract_text_from_content_array(trimmed) {
+                Some(t) if !t.is_empty() => {
+                    prose = t;
+                    &prose as &str
+                }
+                _ => continue,
+            }
+        } else {
+            trimmed
+        };
+
+        let stripped = strip_code_fences(text_input);
+        let text = stripped.trim();
 
         if text.is_empty() {
             continue;
         }
 
-        if let Some(sentence) = last_sentence(text) {
-            return truncate_at_word(&sentence, MAX_NEXT_ACTION_CHARS);
-        }
+        return truncate_at_word(text, MAX_NEXT_ACTION_CHARS);
     }
     NO_NEXT_ACTION_SENTINEL.to_string()
+}
+
+/// Parse a JSON content array and join all `{"type":"text","text":"..."}` blocks.
+/// Returns None if the input isn't a valid array or has no text blocks.
+fn extract_text_from_content_array(s: &str) -> Option<String> {
+    let arr: Vec<serde_json::Value> = serde_json::from_str(s).ok()?;
+    let texts: Vec<&str> = arr
+        .iter()
+        .filter(|item| {
+            item.get("type").and_then(|t| t.as_str()) == Some("text")
+        })
+        .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+        .collect();
+    if texts.is_empty() {
+        None
+    } else {
+        Some(texts.join("\n"))
+    }
 }
 
 /// Remove Markdown code-fence blocks. Lines that start with ` ``` ` (ignoring
@@ -199,9 +230,10 @@ mod tests {
     }
 
     #[test]
-    fn extracts_final_sentence_of_latest_assistant_turn() {
+    fn returns_full_last_assistant_response() {
         let rows = vec![make_row("assistant", "I did X. Now run Y.")];
-        assert_eq!(extract_next_action(&rows), "Now run Y.");
+        // Returns the full text, not just the last sentence.
+        assert_eq!(extract_next_action(&rows), "I did X. Now run Y.");
     }
 
     #[test]
@@ -209,19 +241,21 @@ mod tests {
         let content = "Here is the code:\n```\nlet x = 1;\n```\nNow compile it.";
         let rows = vec![make_row("assistant", content)];
         let result = extract_next_action(&rows);
-        assert_eq!(result, "Now compile it.");
+        assert!(result.contains("Now compile it."), "got: {result}");
+        assert!(!result.contains("let x = 1"), "code fence not stripped: {result}");
     }
 
     #[test]
-    fn handles_question_mark_terminator() {
+    fn handles_question_mark_in_response() {
         let rows = vec![make_row("assistant", "Step one done. Should we proceed?")];
         let result = extract_next_action(&rows);
-        assert_eq!(result, "Should we proceed?");
+        assert!(result.contains("Step one done"), "got: {result}");
+        assert!(result.contains("Should we proceed?"), "got: {result}");
     }
 
     #[test]
-    fn truncates_long_sentence_at_word_boundary() {
-        let long = format!("First step done. {} action.", "do the next ".repeat(12));
+    fn truncates_very_long_response_at_word_boundary() {
+        let long = "word ".repeat(600); // well over 2000 chars
         let rows = vec![make_row("assistant", &long)];
         let result = extract_next_action(&rows);
         assert!(result.ends_with('…'), "expected ellipsis, got: {result}");
@@ -260,9 +294,10 @@ mod tests {
     }
 
     #[test]
-    fn strips_markdown_bullet_prefix() {
-        let rows = vec![make_row("assistant", "- Run cargo test.")];
+    fn returns_full_response_including_bullets() {
+        // Bullet prefixes are preserved in full-response mode.
+        let rows = vec![make_row("assistant", "- Run cargo test.\n- Then push.")];
         let result = extract_next_action(&rows);
-        assert_eq!(result, "Run cargo test.");
+        assert!(result.contains("cargo test"), "got: {result}");
     }
 }

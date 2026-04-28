@@ -17,16 +17,40 @@ pub const MAX_BULLET_CHARS: usize = 80;
 /// Detect unresolved questions and TODO-style markers across the session.
 /// Returns up to 5 deduplicated bullets.
 ///
-/// Rows are walked in chronological order (oldest first). Each row's content
-/// is scanned for TODO/FIXME/XXX markers and sentences ending with `?`.
-/// If the content looks like a JSON array (starts with `[`), it is parsed
-/// and each `text` field extracted before scanning.
+/// Only prose rows are scanned — tool result rows (content is a JSON array
+/// with no `type:text` blocks) and non-user/assistant roles are skipped.
 pub fn extract_open_questions(rows: &[LedgerRow]) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut bullets: Vec<String> = Vec::new();
 
     for row in rows.iter() {
-        let text = resolve_content(&row.content);
+        if row.role != "user" && row.role != "assistant" {
+            continue;
+        }
+        let trimmed = row.content.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        // For user rows: only scan plain-text content (actual prompts).
+        // JSON array content in user rows is always a tool result or skill
+        // injection — never a user-authored question.
+        // For assistant rows: extract text blocks from JSON content arrays.
+        let text = if row.role == "user" {
+            if trimmed.starts_with('[') {
+                continue; // tool result / skill injection — skip entirely
+            }
+            trimmed.to_string()
+        } else {
+            // assistant row
+            if trimmed.starts_with('[') {
+                match extract_prose_from_array(trimmed) {
+                    Some(t) if !t.is_empty() => t,
+                    _ => continue,
+                }
+            } else {
+                trimmed.to_string()
+            }
+        };
         collect_bullets(&text, &mut seen, &mut bullets);
         if bullets.len() >= MAX_OPEN_QUESTIONS {
             break;
@@ -37,24 +61,20 @@ pub fn extract_open_questions(rows: &[LedgerRow]) -> Vec<String> {
     bullets
 }
 
-/// If `content` looks like a JSON array, extract all `"text"` string values
-/// and join them with newlines. Otherwise return the content as-is.
-fn resolve_content(content: &str) -> String {
-    let trimmed = content.trim();
-    if trimmed.starts_with('[') {
-        if let Ok(arr) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            if let Some(items) = arr.as_array() {
-                let texts: Vec<&str> = items
-                    .iter()
-                    .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
-                    .collect();
-                if !texts.is_empty() {
-                    return texts.join("\n");
-                }
-            }
-        }
+/// Extract only `{"type":"text"}` blocks from a JSON content array.
+/// Returns None if the array has no text blocks (tool-only turn).
+fn extract_prose_from_array(s: &str) -> Option<String> {
+    let arr: Vec<serde_json::Value> = serde_json::from_str(s).ok()?;
+    let texts: Vec<&str> = arr
+        .iter()
+        .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("text"))
+        .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+        .collect();
+    if texts.is_empty() {
+        None
+    } else {
+        Some(texts.join("\n"))
     }
-    content.to_string()
 }
 
 /// Scan `text` for TODO/FIXME/XXX markers and `?`-terminated sentences;
@@ -267,14 +287,28 @@ mod tests {
     }
 
     #[test]
-    fn handles_array_content() {
+    fn handles_array_content_in_assistant_row() {
+        // Assistant rows with JSON content arrays are scanned.
         let content = r#"[{"type":"text","text":"TODO: x"}]"#;
-        let rows = vec![make_row("user", content)];
+        let rows = vec![make_row("assistant", content)];
         let result = extract_open_questions(&rows);
         assert!(
             !result.is_empty(),
-            "expected bullet from JSON array content"
+            "expected bullet from assistant JSON array content"
         );
         assert!(result[0].contains('x'), "got: {:?}", result);
+    }
+
+    #[test]
+    fn skips_json_array_user_rows() {
+        // User rows with JSON arrays (tool results / skill injections) are skipped.
+        let content = r#"[{"type":"text","text":"Can someone read this?"}]"#;
+        let rows = vec![make_row("user", content)];
+        let result = extract_open_questions(&rows);
+        assert!(
+            result.is_empty(),
+            "user JSON array rows must be skipped, got: {:?}",
+            result
+        );
     }
 }

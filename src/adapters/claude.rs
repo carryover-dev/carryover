@@ -97,11 +97,12 @@ impl Adapter for ClaudeAdapter {
 
     /// Read new complete lines from the cursor's file starting at byte_offset.
     ///
-    /// A partial line at the tail (no trailing `\n`) is NOT consumed — the
-    /// adapter emits `AdapterError::PartialJsonl` with the offset of the
-    /// partial line's first byte. If the file ends exactly on a newline
-    /// boundary (or is empty past the cursor), returns normally with an
-    /// empty-or-populated vec and an advanced cursor.
+    /// A partial line at the tail (no trailing `\n`) is silently left
+    /// unconsumed — the returned cursor stops at the last complete newline so
+    /// the partial bytes are re-read on the next poll once the writer finishes
+    /// the line. If the file ends exactly on a newline boundary (or is empty
+    /// past the cursor), returns normally with an empty-or-populated vec and
+    /// an advanced cursor.
     fn read_new_records(
         &self,
         since: &Self::Cursor,
@@ -317,13 +318,15 @@ const MAX_READ_BYTES_PER_POLL: u64 = 64 * 1024 * 1024;
 /// `(end_offset_exclusive, line_bytes_including_newline)`.
 ///
 /// If a partial line (bytes without a trailing `\n`) is detected at the tail,
-/// returns `AdapterError::PartialJsonl` with the offset of the partial line's
-/// first byte. The partial bytes are not included in records.
+/// the partial bytes are silently left unconsumed: the returned cursor stops at
+/// the last complete newline so the partial content is re-read on the next poll
+/// once the writer finishes the line.
 fn read_complete_lines(
     file_path: &Path,
     from_offset: u64,
     tool: &str,
 ) -> Result<(LineRecords, u64), AdapterError> {
+    let _ = tool;
     let mut file = std::fs::File::open(file_path)?;
     file.seek(SeekFrom::Start(from_offset))?;
 
@@ -348,28 +351,10 @@ fn read_complete_lines(
                 cursor = line_end;
             }
             None => {
-                // Remaining bytes form a partial line — no trailing newline.
-                let partial_offset = from_offset + cursor as u64;
-                // Build a minimal serde_json::Error to satisfy the type.
-                // We use from_str on truncated JSON to get a real parse error
-                // that reflects the partial content.
-                let partial_bytes = &buf[cursor..];
-                // Manufacture a serde_json::Error from the partial slice. If
-                // the slice somehow parses successfully (only possible on
-                // pathological inputs that happen to be a valid JSON value
-                // without a trailing newline), fall back to the helper error
-                // so we never panic via .unwrap_err().
-                let partial_err = serde_json::from_slice::<serde_json::Value>(partial_bytes)
-                    .err()
-                    .unwrap_or_else(make_missing_field_error);
-                // Suppress unused variable warning — tool is passed for
-                // potential future structured logging but not needed for the
-                // error value itself.
-                let _ = tool;
-                return Err(AdapterError::PartialJsonl {
-                    offset: partial_offset,
-                    source: partial_err,
-                });
+                // Partial tail — stop here; the cursor stays at byte_pos
+                // (end of the last complete line) so the partial bytes are
+                // re-read on the next poll.
+                break;
             }
         }
     }
@@ -633,23 +618,27 @@ mod tests {
         }
     }
 
-    // 5. Partial tail emits PartialJsonl with the correct offset.
+    // 5. Partial tail is silently skipped; complete lines are returned and the
+    //    cursor stops at the last complete newline (offset 798).
     #[test]
-    fn partial_line_tail_returns_error_with_offset() {
+    fn partial_line_tail_returns_complete_lines_and_stops_cursor() {
         let a = adapter();
         let cursor = cursor_for("5-partial-line-tail.jsonl");
-        let err = a.read_new_records(&cursor).unwrap_err();
+        let (records, advanced) = a.read_new_records(&cursor).unwrap();
 
-        match err {
-            AdapterError::PartialJsonl { offset, .. } => {
-                assert_eq!(
-                    offset, 798,
-                    "partial line must start at byte 798, got {}",
-                    offset
-                );
-            }
-            other => panic!("expected AdapterError::PartialJsonl, got {:?}", other),
-        }
+        // The fixture has 3 complete lines before the partial tail.
+        assert!(!records.is_empty(), "should return the complete lines before partial tail");
+        assert_eq!(
+            advanced.byte_offset, 798,
+            "cursor must stop at last complete newline (798), got {}",
+            advanced.byte_offset
+        );
+
+        // A second read from the advanced cursor must return nothing new
+        // (partial tail is still incomplete).
+        let (records2, advanced2) = a.read_new_records(&advanced).unwrap();
+        assert!(records2.is_empty(), "no new complete lines on second read");
+        assert_eq!(advanced2.byte_offset, advanced.byte_offset, "cursor stable");
     }
 
     // 6. Cursor is monotonic across two reads on a stable file (using fixture 1).
