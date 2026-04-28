@@ -99,6 +99,12 @@ pub fn publish(
     write_atomic::write_owner_only(&user_handoff, body.as_bytes())?;
     write_atomic::write_owner_only(&project_handoff, body.as_bytes())?;
 
+    // STEP 3b. Write progress.md (append-only accumulated log) to project dir.
+    if !distilled.progress_log.is_empty() {
+        let progress_path = project_carryover_dir.join("progress.md");
+        write_atomic::write_owner_only(&progress_path, distilled.progress_log.as_bytes())?;
+    }
+
     // Dual-write integrity: read both back and assert byte-identity.
     // assert! (not debug_assert!) so a release-build regression cannot
     // silently emit divergent bytes.
@@ -183,6 +189,7 @@ mod tests {
             recent_files: vec!["src/publish/mod.rs".to_string()],
             failed_approaches: vec![],
             git_context: "branch publisher / clean".to_string(),
+            progress_log: String::new(),
         }
     }
 

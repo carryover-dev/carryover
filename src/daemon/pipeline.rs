@@ -19,6 +19,7 @@ use crate::daemon::{fs_watcher::WatchEvent, hook_endpoint::HookEvent};
 use crate::distill::{
     failed_approaches::extract_failed_approaches, git_context::extract_git_context,
     next_action::extract_next_action, open_questions::extract_open_questions,
+    progress_log::{build_progress_log, extract_progress_entries},
     recent_files::extract_recent_files, task::extract_task,
 };
 use crate::publish::{publish, Distilled, PublishContext};
@@ -194,16 +195,25 @@ impl Pipeline {
         let all_rows = self.ledger.query_session(real_session_id)?;
         let rows = if all_rows.is_empty() { new_rows } else { &all_rows };
 
+        let next_action = extract_next_action(rows);
+
+        // Build accumulated progress log: read existing file, append new entries.
+        let progress_path = project_dir.join(".carryover").join("progress.md");
+        let existing_progress = std::fs::read_to_string(&progress_path).unwrap_or_default();
+        let new_entries = extract_progress_entries(new_rows);
+        let progress_log = build_progress_log(&existing_progress, &new_entries, &next_action);
+
         let distilled = Distilled {
             source_tool: tool.to_string(),
             session_id: session_id.to_string(),
             timestamp_iso: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
             task: extract_task(rows),
             open_questions: extract_open_questions(rows),
-            next_action: extract_next_action(rows),
+            next_action: next_action.clone(),
             recent_files: extract_recent_files(rows),
             failed_approaches: extract_failed_approaches(rows),
             git_context: extract_git_context(rows, Some(Path::new(&self.home_dir))),
+            progress_log,
         };
 
         let ctx = PublishContext {

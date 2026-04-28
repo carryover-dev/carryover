@@ -16,6 +16,7 @@ pub struct Distilled {
     pub recent_files: Vec<String>,      // empty for non-coding sessions
     pub failed_approaches: Vec<String>, // empty for non-coding sessions
     pub git_context: String,            // sentinel for non-git
+    pub progress_log: String,           // accumulated progress log from progress.md
 }
 
 /// Render the 50-line handoff payload. Hard cap enforced.
@@ -92,6 +93,15 @@ pub fn render_handoff(d: &Distilled, resume_mode: &str) -> String {
         lines.push(String::new());
     }
 
+    // Progress log (accumulated across all ingests, append-only)
+    if !d.progress_log.is_empty() {
+        lines.push("## Progress log".to_string());
+        for line in d.progress_log.lines() {
+            lines.push(line.to_string());
+        }
+        lines.push(String::new());
+    }
+
     // Soft cap. We collect lines first, then truncate.
     if lines.len() > MAX_HANDOFF_LINES {
         lines.truncate(MAX_HANDOFF_LINES - 1);
@@ -124,6 +134,7 @@ mod tests {
             recent_files: vec![],
             failed_approaches: vec![],
             git_context: "<no git context>".to_string(),
+            progress_log: String::new(),
         }
     }
 
