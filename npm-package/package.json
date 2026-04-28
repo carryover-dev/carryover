@@ -1,0 +1,50 @@
+{
+  "name": "carryover",
+  "version": "0.0.0",
+  "description": "Zero-LLM-token context-handoff daemon — resume any AI session across Claude Code, Cursor, and Codex.",
+  "homepage": "https://github.com/carryover-dev/carryover",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/carryover-dev/carryover.git"
+  },
+  "bugs": {
+    "url": "https://github.com/carryover-dev/carryover/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "Carryover contributors",
+  "bin": {
+    "carryoverd": "./bin/carryoverd"
+  },
+  "files": [
+    "bin/",
+    "scripts/postinstall.js",
+    "scripts/sha256.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "linux",
+    "darwin"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "keywords": [
+    "ai",
+    "claude",
+    "cursor",
+    "codex",
+    "context",
+    "handoff",
+    "session",
+    "resume",
+    "developer-tools"
+  ]
+}
