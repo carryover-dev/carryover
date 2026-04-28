@@ -19,7 +19,7 @@ use crate::daemon::hook_endpoint::LOOPBACK_PORT;
 /// Return the canonical curl stub command for a (tool, event) pair.
 pub fn curl_stub(tool: &str, event: &str) -> String {
     format!(
-        "curl -X POST -s -d '{{}}' http://127.0.0.1:{LOOPBACK_PORT}/hook/{tool}/{event} > /dev/null 2>&1 &"
+        "curl -X POST -s -H 'Content-Type: application/json' -d '{{}}' http://127.0.0.1:{LOOPBACK_PORT}/hook/{tool}/{event} > /dev/null 2>&1 &"
     )
 }
 
@@ -111,11 +111,31 @@ pub fn write_claude_hooks(settings_path: &Path, hooks: &[(&str, &str)]) -> Resul
             _ => unreachable!(),
         };
 
-        // Idempotent: only append if our entry isn't already present.
-        if !arr.iter().any(|e| is_our_entry(e, &stub)) {
-            arr.push(entry);
+        // Already up to date — nothing to do.
+        if arr.iter().any(|e| is_our_entry(e, &stub)) {
+            continue;
+        }
+
+        // Migrate: remove any stale entry whose command URL contains our
+        // port + path (catches old command formats when the stub changes).
+        let port_path = format!("/hook/{tool}/{event}");
+        let before = arr.len();
+        arr.retain(|e| {
+            let cmd = e
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .and_then(|a| a.first())
+                .and_then(|h| h.get("command"))
+                .and_then(|c| c.as_str())
+                .unwrap_or("");
+            !cmd.contains(&port_path)
+        });
+        if arr.len() != before {
             modified = true;
         }
+
+        arr.push(entry);
+        modified = true;
     }
 
     if !modified {
@@ -561,7 +581,7 @@ mod tests {
         let s = curl_stub("claude", "SessionStart");
         assert_eq!(
             s,
-            "curl -X POST -s -d '{}' http://127.0.0.1:47823/hook/claude/SessionStart > /dev/null 2>&1 &"
+            "curl -X POST -s -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:47823/hook/claude/SessionStart > /dev/null 2>&1 &"
         );
     }
 

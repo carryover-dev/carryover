@@ -108,16 +108,30 @@ impl Adapter for ClaudeAdapter {
     ) -> Result<(Vec<RawRecord>, Self::Cursor), AdapterError> {
         let file_path = &since.file_path;
 
-        // Empty path means nothing has been configured yet — return empty.
-        if file_path.as_os_str().is_empty() {
-            return Ok((
-                vec![],
-                ClaudeCursor {
-                    file_path: file_path.clone(),
-                    byte_offset: 0,
-                    last_uuid: since.last_uuid.clone(),
-                },
-            ));
+        // No cursor yet (or file no longer exists): discover the most recently
+        // modified JSONL transcript and start reading from offset 0.
+        if file_path.as_os_str().is_empty() || !file_path.exists() {
+            let root = self.projects_root()?;
+            let discovered = find_newest_transcript(&root);
+            match discovered {
+                None => {
+                    return Ok((
+                        vec![],
+                        ClaudeCursor {
+                            file_path: PathBuf::new(),
+                            byte_offset: 0,
+                            last_uuid: since.last_uuid.clone(),
+                        },
+                    ));
+                }
+                Some(p) => {
+                    return self.read_new_records(&ClaudeCursor {
+                        file_path: p,
+                        byte_offset: 0,
+                        last_uuid: None,
+                    });
+                }
+            }
         }
 
         // Containment + symlink guard: `cursor.file_path` is persisted to the
@@ -193,12 +207,20 @@ impl Adapter for ClaudeAdapter {
                 })?
                 .to_string();
 
-            // Required: ts (unix epoch ms as i64)
-            let ts = parse_timestamp(v.get("ts"), rec.offset)?;
+            // Claude JSONL uses "timestamp" (ISO-8601); fall back to "ts" (epoch ms).
+            // Records without any timestamp (e.g. last-prompt, attachment) are skipped.
+            let ts_val = v.get("timestamp").or_else(|| v.get("ts"));
+            if ts_val.is_none() {
+                continue;
+            }
+            let ts = parse_timestamp(ts_val, rec.offset)?;
 
-            // Required: role (fall back to type if role absent)
-            let role = v
-                .get("role")
+            // Claude JSONL wraps role+content inside a "message" object.
+            // Fall back to top-level role/content for older or alternative formats.
+            let msg = v.get("message");
+            let role = msg
+                .and_then(|m| m.get("role"))
+                .or_else(|| v.get("role"))
                 .and_then(|r| r.as_str())
                 .or_else(|| v.get("type").and_then(|t| t.as_str()))
                 .ok_or_else(|| AdapterError::Parse {
@@ -208,8 +230,10 @@ impl Adapter for ClaudeAdapter {
                 })?
                 .to_string();
 
-            // content: string or array
-            let content_val = v.get("content");
+            // content lives at message.content (string or array) or top-level content.
+            let content_val = msg
+                .and_then(|m| m.get("content"))
+                .or_else(|| v.get("content"));
             let content = match content_val {
                 None => String::new(),
                 Some(serde_json::Value::String(s)) => s.clone(),
@@ -246,6 +270,37 @@ impl Adapter for ClaudeAdapter {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Find the most recently modified `.jsonl` file across all project
+/// subdirectories under `projects_root`. Returns `None` if the root doesn't
+/// exist or contains no JSONL files.
+fn find_newest_transcript(projects_root: &Path) -> Option<PathBuf> {
+    let read_dir = std::fs::read_dir(projects_root).ok()?;
+    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
+    for project_entry in read_dir.flatten() {
+        let project_path = project_entry.path();
+        if !project_path.is_dir() {
+            continue;
+        }
+        let Ok(inner) = std::fs::read_dir(&project_path) else {
+            continue;
+        };
+        for file_entry in inner.flatten() {
+            let p = file_entry.path();
+            if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            if let Ok(meta) = p.metadata() {
+                if let Ok(modified) = meta.modified() {
+                    if newest.as_ref().map(|(t, _)| modified > *t).unwrap_or(true) {
+                        newest = Some((modified, p));
+                    }
+                }
+            }
+        }
+    }
+    newest.map(|(_, p)| p)
+}
 
 /// `(end_offset_exclusive, line_bytes_including_newline)` pairs from a file read.
 type LineRecords = Vec<(u64, Vec<u8>)>;
@@ -330,12 +385,18 @@ fn parse_timestamp(val: Option<&serde_json::Value>, offset: u64) -> Result<i64, 
             context: "ts field is not a valid i64",
             source: make_missing_field_error(),
         }),
-        Some(serde_json::Value::String(_s)) => {
-            // ISO-8601 is not used in any current fixture; parse as integer
-            // string as a best-effort fallback.
-            _s.parse::<i64>().map_err(|_| AdapterError::Parse {
+        Some(serde_json::Value::String(s)) => {
+            // Try integer string first, then ISO-8601 (Claude JSONL format).
+            if let Ok(n) = s.parse::<i64>() {
+                return Ok(n);
+            }
+            // Parse ISO-8601 like "2026-04-28T08:35:19.123Z" → epoch ms.
+            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+                return Ok(dt.timestamp_millis());
+            }
+            Err(AdapterError::Parse {
                 offset,
-                context: "ts field string is not parseable as i64",
+                context: "ts/timestamp field is not parseable as epoch ms or ISO-8601",
                 source: make_missing_field_error(),
             })
         }
