@@ -119,7 +119,6 @@ pub fn write_claude_hooks(settings_path: &Path, hooks: &[(&str, &str)]) -> Resul
         // Migrate: remove any stale entry whose command URL contains our
         // port + path (catches old command formats when the stub changes).
         let port_path = format!("/hook/{tool}/{event}");
-        let before = arr.len();
         arr.retain(|e| {
             let cmd = e
                 .get("hooks")
@@ -130,9 +129,6 @@ pub fn write_claude_hooks(settings_path: &Path, hooks: &[(&str, &str)]) -> Resul
                 .unwrap_or("");
             !cmd.contains(&port_path)
         });
-        if arr.len() != before {
-            modified = true;
-        }
 
         arr.push(entry);
         modified = true;

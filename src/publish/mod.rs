@@ -115,10 +115,13 @@ pub fn publish(
     //    write project-level AGENTS.md + CLAUDE.md with a relative path
     //    so the files are portable when the repo is cloned elsewhere;
     //    also keep the global files up to date for cross-tool sessions.
-    let canonical_home = ctx.home_dir.canonicalize().unwrap_or_else(|_| ctx.home_dir.clone());
+    let canonical_home = ctx
+        .home_dir
+        .canonicalize()
+        .unwrap_or_else(|_| ctx.home_dir.clone());
     let is_project_level = canonical_project != canonical_home;
 
-    let (agents_md, claude_md, agents_md_modified, claude_md_modified) = if is_project_level {
+    let (_agents_md, _claude_md, agents_md_modified, claude_md_modified) = if is_project_level {
         // Project-level: relative pointer in the repo.
         let agents = canonical_project.join("AGENTS.md");
         let claude = canonical_project.join("CLAUDE.md");

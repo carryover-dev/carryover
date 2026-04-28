@@ -181,9 +181,9 @@ async fn hook_handler(
 
     // Validate cwd: must be absolute and contain no `..` components.
     // An invalid cwd is silently dropped — the pipeline falls back to home_dir.
-    let cwd = payload.cwd.filter(|p| {
-        p.is_absolute() && !path_has_parent_component(p)
-    });
+    let cwd = payload
+        .cwd
+        .filter(|p| p.is_absolute() && !path_has_parent_component(p));
 
     let evt = HookEvent {
         tool,
