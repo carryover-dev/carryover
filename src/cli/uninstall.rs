@@ -41,7 +41,7 @@ pub fn run(purge: bool) -> Result<()> {
                 "PreCompact",
                 "UserPromptSubmit",
             ],
-            "cursor" => vec!["beforeSubmitPrompt", "stop"],
+            "cursor" => vec!["beforeSubmitPrompt", "stop", "sessionStart"],
             "codex" => vec![],
             _ => vec![],
         };
