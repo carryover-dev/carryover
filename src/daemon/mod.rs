@@ -4,3 +4,4 @@
 pub mod fs_watcher;
 pub mod hook_endpoint;
 pub mod pipeline;
+pub mod session_window;

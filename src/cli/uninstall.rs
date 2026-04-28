@@ -40,16 +40,21 @@ pub fn run(purge: bool) -> Result<()> {
                 "PreCompact",
                 "UserPromptSubmit",
             ],
-            "cursor" => vec!["sessionStart", "stop"],
-            "codex" => vec![], // hooks were never written in v0.1
+            "cursor" => vec!["beforeSubmitPrompt", "stop"],
+            "codex" => vec![],
             _ => vec![],
         };
 
         let modified = match tool_name.as_str() {
             "claude" => hooks_writer::remove_claude_hooks(&config_path, &events)
                 .with_context(|| format!("remove claude hooks from {}", config_path.display()))?,
-            "cursor" => hooks_writer::remove_cursor_hooks(&config_path, &events)
-                .with_context(|| format!("remove cursor hooks from {}", config_path.display()))?,
+            "cursor" => {
+                hooks_writer::remove_cursor_wrapper_scripts(&home, &events)
+                    .with_context(|| "remove cursor wrapper scripts")?;
+                hooks_writer::remove_cursor_hooks(&config_path, &events).with_context(|| {
+                    format!("remove cursor hooks from {}", config_path.display())
+                })?
+            }
             _ => false,
         };
 

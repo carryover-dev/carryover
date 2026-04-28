@@ -90,8 +90,12 @@ pub fn run() -> Result<()> {
         let modified = match tool_name.as_str() {
             "claude" => hooks_writer::write_claude_hooks(&config_path, &pairs)
                 .with_context(|| format!("write claude hooks to {}", config_path.display()))?,
-            "cursor" => hooks_writer::write_cursor_hooks(&config_path, &pairs)
-                .with_context(|| format!("write cursor hooks to {}", config_path.display()))?,
+            "cursor" => {
+                hooks_writer::write_cursor_wrapper_scripts(&home, &pairs)
+                    .with_context(|| "write cursor wrapper scripts")?;
+                hooks_writer::write_cursor_hooks(&config_path, &pairs)
+                    .with_context(|| format!("write cursor hooks to {}", config_path.display()))?
+            }
             "codex" => {
                 // TODO(codex-toml): wire up after toml crate lands in a follow-up PR.
                 eprintln!("  codex: skipping hook stub write (TOML editing lands in a follow-up)");
@@ -142,7 +146,7 @@ pub fn hook_pairs_for(tool: &str) -> Vec<(&'static str, &'static str)> {
             ("claude", "PreCompact"),
             ("claude", "UserPromptSubmit"),
         ],
-        "cursor" => vec![("cursor", "sessionStart"), ("cursor", "stop")],
+        "cursor" => vec![("cursor", "beforeSubmitPrompt"), ("cursor", "stop")],
         "codex" => vec![("codex", "SessionStart"), ("codex", "Stop")],
         _ => vec![],
     }
@@ -176,7 +180,7 @@ mod tests {
         let pairs = hook_pairs_for("cursor");
         assert_eq!(pairs.len(), 2);
         let events: Vec<&str> = pairs.iter().map(|(_, e)| *e).collect();
-        assert!(events.contains(&"sessionStart"));
+        assert!(events.contains(&"beforeSubmitPrompt"));
         assert!(events.contains(&"stop"));
     }
 

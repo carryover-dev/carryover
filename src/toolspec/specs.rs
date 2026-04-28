@@ -179,7 +179,7 @@ static CURSOR_TRANSCRIPT_PATH: PathSpec = PathSpec {
 };
 
 static CURSOR_HOOKSET_V040: HookSet = HookSet {
-    session_start: "sessionStart",
+    session_start: "beforeSubmitPrompt",
     session_end: "stop",
     pre_compact: None,
     user_prompt_submit: None,
@@ -279,7 +279,7 @@ mod tests {
         let v = Version::parse("0.50.0").unwrap();
         let (hookset, kind) = CURSOR.resolve_hookset(&v).unwrap();
         assert_eq!(kind, crate::toolspec::FallbackKind::Exact);
-        assert_eq!(hookset.session_start, "sessionStart");
+        assert_eq!(hookset.session_start, "beforeSubmitPrompt");
         assert!(hookset.pre_compact.is_none());
     }
 
