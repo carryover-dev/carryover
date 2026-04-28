@@ -107,7 +107,8 @@ impl Pipeline {
 
         let rows: Vec<LedgerRow> = adapter.parse(raw_records)?;
         self.ledger.insert_batch(&rows)?;
-        self.ledger.save_cursor(tool, session_id, &new_cursor_json)?;
+        self.ledger
+            .save_cursor(tool, session_id, &new_cursor_json)?;
 
         self.distill_and_publish(tool, session_id, &rows)?;
         Ok(())
@@ -257,7 +258,8 @@ mod tests {
         assert!(cursor.is_some(), "cursor should be persisted after ingest");
         // Cursor JSON must deserialize back to a valid MockCursor.
         let cursor_json = cursor.unwrap();
-        let _: MockCursor = serde_json::from_str(&cursor_json).expect("cursor should be valid JSON");
+        let _: MockCursor =
+            serde_json::from_str(&cursor_json).expect("cursor should be valid JSON");
         drop(dir);
     }
 
@@ -324,10 +326,7 @@ mod tests {
             body.contains("# [CARRYOVER]"),
             "handoff should contain protocol title line"
         );
-        assert!(
-            body.len() > 20,
-            "handoff body should be non-trivially long"
-        );
+        assert!(body.len() > 20, "handoff body should be non-trivially long");
         drop(dir);
     }
 

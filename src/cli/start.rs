@@ -26,8 +26,7 @@ pub async fn run() -> Result<()> {
 
     // Worker channels.
     let (hook_tx, mut hook_rx) = unbounded_channel::<hook_endpoint::HookEvent>();
-    let (watcher_tx, mut watcher_rx) =
-        unbounded_channel::<crate::daemon::fs_watcher::WatchEvent>();
+    let (watcher_tx, mut watcher_rx) = unbounded_channel::<crate::daemon::fs_watcher::WatchEvent>();
 
     // Open ledger and build pipeline.
     let ledger_path = Ledger::default_path().context("resolve ledger path")?;

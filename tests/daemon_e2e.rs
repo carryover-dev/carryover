@@ -8,12 +8,12 @@
 use std::collections::HashMap;
 
 use axum::body::Body;
+use axum::http::Request;
 use carryover::adapters::mock::{MockAdapter, MockCursor};
 use carryover::adapters::{AdapterKind, RawRecord};
 use carryover::daemon::hook_endpoint;
 use carryover::daemon::pipeline::build_for_test;
 use carryover::storage::{Ledger, LedgerRow};
-use axum::http::Request;
 use tokio::sync::mpsc::unbounded_channel;
 use tower::ServiceExt as _;
 
@@ -96,16 +96,17 @@ async fn hook_post_produces_ledger_rows_and_handoff() {
     }
 
     // Assert cursor was persisted.
-    let cursor_json = ledger
-        .load_cursor("claude", "e2e-session")
-        .unwrap();
+    let cursor_json = ledger.load_cursor("claude", "e2e-session").unwrap();
     assert!(cursor_json.is_some(), "cursor should be persisted");
     let _: MockCursor = serde_json::from_str(&cursor_json.unwrap())
         .expect("cursor should deserialize as MockCursor");
 
     // Assert handoff.md was written and has the protocol header.
     let handoff = dir.path().join(".carryover").join("handoff.md");
-    assert!(handoff.exists(), "handoff.md should be written after ingest");
+    assert!(
+        handoff.exists(),
+        "handoff.md should be written after ingest"
+    );
     let body = std::fs::read_to_string(&handoff).unwrap();
     assert!(
         body.contains("# [CARRYOVER]"),
