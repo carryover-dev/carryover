@@ -17,7 +17,7 @@
 
 ---
 
-**Status: alpha — v0.1.0 in pre-release.** Linux binaries ship with the v0.1.0 tag; macOS via Homebrew tap once the macOS binaries are pushed (see `MAC_HANDOVER.md` in the contributors' notes).
+**Status: alpha — v0.1.0 in pre-release.**
 
 <p align="center">
   <img src="docs/media/cross-tool-demo.gif" alt="60-second cross-tool resume demo" width="720" />
@@ -63,7 +63,14 @@ cargo install carryover
 
 ### macOS
 
+The Homebrew tap ships shortly after the v0.1.0 Linux release. Until then, npm works on macOS:
+
 ```sh
+npm install -g carryover
+```
+
+```sh
+# After the tap publishes:
 brew install carryover-dev/tap/carryover
 ```
 
@@ -81,7 +88,7 @@ brew install carryover-dev/tap/carryover
 carryoverd install
 ```
 
-A single TUI question: *"Which AI agents do you use?"* — pre-checked with whatever Carryover detects on disk. Confirm and the daemon registers itself (systemd-user on Linux, launchctl on macOS), writes hook stubs into each tool's settings, and starts watching transcripts.
+A single TUI question: *"Which AI agents do you use?"* — pre-checked with whatever Carryover detects on disk. Confirm and the daemon registers itself with systemd-user (on Linux), writes hook stubs into each tool's settings, and starts watching transcripts. macOS launchd registration ships with the Homebrew tap.
 
 ```sh
 carryoverd status      # see what's installed and recent events
@@ -101,6 +108,7 @@ carryoverd uninstall   # remove hooks; ledger preserved by default (--purge to w
 | Hook endpoint on `127.0.0.1:47823` (loopback only, DNS-rebinding guard, body size cap) | ✅ |
 | fs watcher backup signal (notify + debouncer) | ✅ |
 | Linux daemon registration via systemd-user | ✅ |
+| macOS daemon registration via launchd | shipping with the Homebrew tap |
 | Cross-tool integration test (Claude → Cursor / Cursor → Codex / Codex → Cursor / Claude → Codex) | ✅ |
 | `cosign verify-blob` keyless signing on every release artifact | ✅ |
 
