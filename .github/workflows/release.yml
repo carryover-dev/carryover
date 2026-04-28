@@ -95,9 +95,64 @@ jobs:
             ${{ steps.stage.outputs.checksum }}
           retention-days: 7
 
+  build-macos:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            runner: macos-13
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (with target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Stage artifact + checksum
+        id: stage
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          BIN=target/${{ matrix.target }}/release/carryoverd
+          test -f "$BIN" || { echo "binary not found: $BIN"; exit 1; }
+
+          ASSET="carryoverd-${{ github.ref_name }}-${{ matrix.target }}"
+          TARBALL="${ASSET}.tar.gz"
+
+          tar -czf "dist/${TARBALL}" -C "$(dirname "$BIN")" "$(basename "$BIN")"
+          (cd dist && shasum -a 256 "${TARBALL}" > "${TARBALL}.sha256")
+
+          echo "tarball=dist/${TARBALL}" >> "$GITHUB_OUTPUT"
+          echo "checksum=dist/${TARBALL}.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.target }}
+          path: |
+            ${{ steps.stage.outputs.tarball }}
+            ${{ steps.stage.outputs.checksum }}
+          retention-days: 7
+
   sign-and-release:
     name: Sign + publish release
-    needs: build-linux
+    needs: [build-linux, build-macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
