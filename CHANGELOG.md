@@ -4,11 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once v0.1.0 ships.
 
-## 0.1.0 — Unreleased
+## 0.1.0 — 2026-04-28
 
-First public release. Working cross-tool resume between Claude Code, Cursor, and Codex on Linux. macOS install path documented in the release notes.
+First public release. Working cross-tool context-handoff between Claude Code, Cursor, and Codex on Linux. macOS support documented in release notes.
 
-(Full release notes will replace this stub when the tag is cut.)
+### Added
+
+- `carryoverd install` — writes correct hooks for Claude Code (`settings.json`), Cursor (`hooks.json` with wrapper scripts), and Codex (`config.toml` notify array + AGENTS.md pointer block).
+- `carryoverd refresh` — re-applies hooks idempotently after config changes.
+- `carryoverd uninstall [--purge]` — removes all hooks; `--purge` also wipes the ledger.
+- `carryoverd status` — shows daemon liveness and configured tools.
+- Background daemon (`carryoverd`) with systemd unit for Linux autostart.
+- SQLite ledger for per-session handoff snapshots.
+- Session-window tracking (5-minute idle timeout) to distinguish resuming from a fresh start.
+- npm package (`npm install -g carryover`) with SHA-256–verified binary download.
+- Homebrew formula (macOS, pending tap publication).
+- cosign keyless signing for all release artifacts.
 
 ## [Unreleased]
 
