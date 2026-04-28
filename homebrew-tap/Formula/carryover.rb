@@ -26,11 +26,11 @@ class Carryover < Formula
   on_macos do
     on_arm do
       url "https://github.com/carryover-dev/carryover/releases/download/v#{version}/carryoverd-v#{version}-aarch64-apple-darwin.tar.gz"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+      sha256 "56011ea56d600390864bc53e850efe0670f50fc913d169950c279a1607778baf"
     end
     on_intel do
       url "https://github.com/carryover-dev/carryover/releases/download/v#{version}/carryoverd-v#{version}-x86_64-apple-darwin.tar.gz"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+      sha256 "c13b403de1ae1cce944927b8b7a3f486e2e077d163cd47acea07a1efc7420d11"
     end
   end
 
