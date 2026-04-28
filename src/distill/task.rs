@@ -1,5 +1,6 @@
 //! `task` extractor — condenses the latest substantial user turn into one line.
 
+use super::util::truncate_at_word;
 use crate::storage::LedgerRow;
 
 pub const MAX_TASK_CHARS: usize = 120;
@@ -35,25 +36,6 @@ pub fn extract_task(rows: &[LedgerRow]) -> String {
         return truncate_at_word(first_line, MAX_TASK_CHARS);
     }
     NO_TASK_SENTINEL.to_string()
-}
-
-/// Truncate `s` to at most `max_chars` characters (by char count). If truncation
-/// is needed, cut at the last ASCII word boundary before the limit and append `…`.
-fn truncate_at_word(s: &str, max_chars: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= max_chars {
-        return s.to_string();
-    }
-    // Collect up to max_chars chars.
-    let prefix: String = s.chars().take(max_chars).collect();
-    // Find last whitespace boundary in the prefix.
-    if let Some(boundary) = prefix.rfind(|c: char| c.is_ascii_whitespace()) {
-        let trimmed = prefix[..boundary].trim_end();
-        format!("{}…", trimmed)
-    } else {
-        // No word boundary — hard-cut.
-        format!("{}…", prefix)
-    }
 }
 
 // ---------------------------------------------------------------------------

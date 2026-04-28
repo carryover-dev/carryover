@@ -1,6 +1,7 @@
 //! `next_action` extractor — pulls the final actionable sentence from the
 //! latest assistant turn.
 
+use super::util::truncate_at_word;
 use crate::storage::LedgerRow;
 
 pub const MAX_NEXT_ACTION_CHARS: usize = 120;
@@ -174,22 +175,6 @@ fn last_sentence(text: &str) -> Option<String> {
     }
 
     sentences.into_iter().rev().find(|s| !s.is_empty())
-}
-
-/// Truncate `s` to at most `max_chars` characters. If truncation is needed,
-/// cut at the last ASCII whitespace boundary before the cap and append `…`.
-fn truncate_at_word(s: &str, max_chars: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= max_chars {
-        return s.to_string();
-    }
-    let prefix: String = s.chars().take(max_chars).collect();
-    if let Some(boundary) = prefix.rfind(|c: char| c.is_ascii_whitespace()) {
-        let trimmed = prefix[..boundary].trim_end();
-        format!("{}…", trimmed)
-    } else {
-        format!("{}…", prefix)
-    }
 }
 
 // ---------------------------------------------------------------------------
