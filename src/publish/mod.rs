@@ -121,7 +121,7 @@ pub fn publish(
         .unwrap_or_else(|_| ctx.home_dir.clone());
     let is_project_level = canonical_project != canonical_home;
 
-    let (agents_md, claude_md, agents_md_modified, claude_md_modified) = if is_project_level {
+    let (_agents_md, _claude_md, agents_md_modified, claude_md_modified) = if is_project_level {
         // Project-level: relative pointer in the repo.
         let agents = canonical_project.join("AGENTS.md");
         let claude = canonical_project.join("CLAUDE.md");
