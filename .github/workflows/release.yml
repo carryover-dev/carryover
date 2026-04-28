@@ -1,0 +1,199 @@
+name: Release
+
+# v0.1 alpha: actions are pinned to versioned tags (@v3, @v2). Full SHA
+# pinning across every action is a v0.2 supply-chain hardening pass.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write       # create release + upload assets
+  id-token: write       # cosign keyless OIDC
+  attestations: write   # for sigstore attestations
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build-linux:
+    name: Build (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            cross: true
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (with target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compile linker for aarch64
+        if: matrix.cross
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          # Refuse to overwrite an existing .cargo/config.toml — if the
+          # repo ever adds one (registry mirrors, net.retry, etc) we
+          # don't want this step silently shadowing it.
+          if [ -e .cargo/config.toml ]; then
+            echo "ERROR: .cargo/config.toml already exists; release.yml refuses to overwrite." >&2
+            exit 1
+          fi
+          mkdir -p .cargo
+          cat <<EOF > .cargo/config.toml
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Stage artifact + checksum
+        id: stage
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          BIN=target/${{ matrix.target }}/release/carryoverd
+          test -f "$BIN" || { echo "binary not found: $BIN"; exit 1; }
+
+          ASSET="carryoverd-${{ github.ref_name }}-${{ matrix.target }}"
+          TARBALL="${ASSET}.tar.gz"
+
+          # Tarball with the binary at top level for predictable extraction.
+          tar -czf "dist/${TARBALL}" -C "$(dirname "$BIN")" "$(basename "$BIN")"
+
+          # SHA-256 checksum of the tarball.
+          (cd dist && sha256sum "${TARBALL}" > "${TARBALL}.sha256")
+
+          echo "tarball=dist/${TARBALL}" >> "$GITHUB_OUTPUT"
+          echo "checksum=dist/${TARBALL}.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.target }}
+          path: |
+            ${{ steps.stage.outputs.tarball }}
+            ${{ steps.stage.outputs.checksum }}
+          retention-days: 7
+
+  sign-and-release:
+    name: Sign + publish release
+    needs: build-linux
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign artifacts (cosign keyless via OIDC)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for f in dist/*.tar.gz; do
+            cosign sign-blob --yes \
+              --output-signature "${f}.sig" \
+              --output-certificate "${f}.pem" \
+              "${f}"
+          done
+
+      - name: Generate aggregate SHA-256 manifest
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+
+          # Try to extract the section for this tag; fall back to a generic
+          # template if the CHANGELOG doesn't have an entry yet.
+          NOTES=$(awk -v tag="${TAG#v}" '
+            BEGIN { found = 0 }
+            /^## / {
+              if (found) exit
+              if (index($0, tag) > 0) { found = 1; print; next }
+            }
+            found { print }
+          ' CHANGELOG.md || true)
+
+          if [ -z "${NOTES}" ]; then
+            NOTES="Release ${TAG}"
+          fi
+
+          {
+            echo "## What's in this release"
+            echo
+            echo "${NOTES}"
+            echo
+            echo "## Verification"
+            echo
+            echo "Each artifact is signed with [cosign keyless](https://docs.sigstore.dev/cosign/keyless/) using GitHub Actions OIDC."
+            echo
+            echo '```sh'
+            echo '# Verify (replace <ASSET> with the file you downloaded)'
+            echo 'cosign verify-blob \\'
+            echo '  --certificate "<ASSET>.pem" \\'
+            echo '  --signature "<ASSET>.sig" \\'
+            echo '  --certificate-identity-regexp "^https://github.com/carryover-dev/carryover/.github/workflows/release\.yml@refs/tags/v.*" \\'
+            echo '  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \\'
+            echo '  "<ASSET>"'
+            echo '```'
+            echo
+            echo "## macOS first-run note"
+            echo
+            echo "v0.1 ships unsigned (cosign-only, no Apple Developer ID notarization yet). On macOS, Gatekeeper will refuse to launch the binary on first run. Strip the quarantine flag once after extraction:"
+            echo
+            echo '```sh'
+            echo "xattr -d com.apple.quarantine \$(which carryoverd)"
+            echo '```'
+            echo
+            echo "Apple Developer ID + notarization is on the v1.0 roadmap. For v0.1 we accept the one-time \`xattr\` step in exchange for keeping the project free + open-source-friendly."
+          } > release-notes.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.tar.gz.sig
+            dist/*.tar.gz.pem
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
