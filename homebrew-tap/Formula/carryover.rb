@@ -37,11 +37,11 @@ class Carryover < Formula
   on_linux do
     on_arm do
       url "https://github.com/carryover-dev/carryover/releases/download/v#{version}/carryoverd-v#{version}-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+      sha256 "8e3c5fa86993d0c1e75731e63bf0805cbe81748ea098701dae579fb97c71e82b"
     end
     on_intel do
       url "https://github.com/carryover-dev/carryover/releases/download/v#{version}/carryoverd-v#{version}-x86_64-unknown-linux-gnu.tar.gz"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+      sha256 "be07d62d1fc9c5366d7b900c96e61ae0365d1202db7641022439ef8b3b2bf73b"
     end
   end
 
