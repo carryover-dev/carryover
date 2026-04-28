@@ -96,7 +96,13 @@ impl Pipeline {
 
     /// Core ingest: load cursor → read new records → parse → insert → advance
     /// cursor → distill → publish.
-    fn ingest(&self, tool: &str, session_id: &str, force_rescan: bool, project_dir: &Path) -> Result<()> {
+    fn ingest(
+        &self,
+        tool: &str,
+        session_id: &str,
+        force_rescan: bool,
+        project_dir: &Path,
+    ) -> Result<()> {
         let adapter = match self.adapters.get(tool) {
             Some(a) => a,
             None => return Ok(()), // tool not in config
@@ -124,7 +130,13 @@ impl Pipeline {
         Ok(())
     }
 
-    fn distill_and_publish(&self, tool: &str, session_id: &str, rows: &[LedgerRow], project_dir: &Path) -> Result<()> {
+    fn distill_and_publish(
+        &self,
+        tool: &str,
+        session_id: &str,
+        rows: &[LedgerRow],
+        project_dir: &Path,
+    ) -> Result<()> {
         let distilled = Distilled {
             source_tool: tool.to_string(),
             session_id: session_id.to_string(),
@@ -256,7 +268,9 @@ mod tests {
     #[test]
     fn ingest_mock_produces_ledger_rows() {
         let (pipeline, dir) = test_pipeline();
-        pipeline.ingest("mock", "session-1", false, &pipeline.home_dir.clone()).unwrap();
+        pipeline
+            .ingest("mock", "session-1", false, &pipeline.home_dir.clone())
+            .unwrap();
         let rows = pipeline.ledger.query_recent("mock", 100).unwrap();
         assert!(
             !rows.is_empty(),
@@ -274,7 +288,9 @@ mod tests {
     #[test]
     fn ingest_unknown_tool_is_noop() {
         let (pipeline, dir) = test_pipeline();
-        pipeline.ingest("unknown", "s1", false, &pipeline.home_dir.clone()).unwrap();
+        pipeline
+            .ingest("unknown", "s1", false, &pipeline.home_dir.clone())
+            .unwrap();
         assert_eq!(
             pipeline.ledger.query_recent("unknown", 10).unwrap().len(),
             0
@@ -286,9 +302,13 @@ mod tests {
     fn ingest_idempotent_after_cursor_advance() {
         // Second ingest with an advanced cursor should return 0 new rows.
         let (pipeline, dir) = test_pipeline();
-        pipeline.ingest("mock", "s1", false, &pipeline.home_dir.clone()).unwrap();
+        pipeline
+            .ingest("mock", "s1", false, &pipeline.home_dir.clone())
+            .unwrap();
         let count_after_first = pipeline.ledger.query_recent("mock", 100).unwrap().len();
-        pipeline.ingest("mock", "s1", false, &pipeline.home_dir.clone()).unwrap();
+        pipeline
+            .ingest("mock", "s1", false, &pipeline.home_dir.clone())
+            .unwrap();
         let count_after_second = pipeline.ledger.query_recent("mock", 100).unwrap().len();
         assert_eq!(
             count_after_first, count_after_second,
@@ -300,10 +320,14 @@ mod tests {
     #[test]
     fn force_rescan_re_reads_from_start() {
         let (pipeline, dir) = test_pipeline();
-        pipeline.ingest("mock", "s1", false, &pipeline.home_dir.clone()).unwrap();
+        pipeline
+            .ingest("mock", "s1", false, &pipeline.home_dir.clone())
+            .unwrap();
         let count_after_normal = pipeline.ledger.query_recent("mock", 100).unwrap().len();
         // Force rescan: resets cursor then re-reads all records.
-        pipeline.ingest("mock", "s1", true, &pipeline.home_dir.clone()).unwrap();
+        pipeline
+            .ingest("mock", "s1", true, &pipeline.home_dir.clone())
+            .unwrap();
         let count_after_rescan = pipeline.ledger.query_recent("mock", 100).unwrap().len();
         // Rescan should produce ≥ as many rows as the first ingest.
         assert!(
@@ -326,7 +350,9 @@ mod tests {
             files_touched_json: None,
             parent_id: None,
         }];
-        pipeline.distill_and_publish("mock", "s1", &rows, &pipeline.home_dir.clone()).unwrap();
+        pipeline
+            .distill_and_publish("mock", "s1", &rows, &pipeline.home_dir.clone())
+            .unwrap();
         let handoff = dir.path().join(".carryover").join("handoff.md");
         assert!(handoff.exists(), "handoff.md should be written");
         let body = std::fs::read_to_string(&handoff).unwrap();
