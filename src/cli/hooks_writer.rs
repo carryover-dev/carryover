@@ -258,6 +258,15 @@ pub fn write_cursor_hooks(settings_path: &Path, hooks: &[(&str, &str)]) -> Resul
         _ => serde_json::Map::new(),
     };
     let mut modified = false;
+
+    // Migration: remove the old bare-string sessionStart entry written by v0.0.x.
+    if let Some(v) = map.get("sessionStart") {
+        if v.is_string() && v.as_str().map(|s| s.contains("carryover")).unwrap_or(false) {
+            map.remove("sessionStart");
+            modified = true;
+        }
+    }
+
     for (_tool, event) in hooks {
         let script = cursor_wrapper_path(&home, event);
         let script_str = script.to_string_lossy().into_owned();
