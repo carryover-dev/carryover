@@ -262,28 +262,59 @@ mod tests {
         assert_eq!(watcher.roots[0], dir.path());
     }
 
+    /// macOS reports paths under `/private/var/folders/...` while
+    /// `tempfile::tempdir()` returns `/var/folders/...`. Canonicalize both
+    /// sides before comparing so FSEvents canonicalization doesn't break
+    /// the assertion. Linux is unaffected (canonical path = the same path).
+    fn canonical(p: &std::path::Path) -> PathBuf {
+        std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+    }
+
+    /// FSEvents on macOS has higher and more variable latency than inotify
+    /// on Linux. 5 s is generous enough to cover macOS-14 GitHub runners
+    /// while still failing fast in normal Linux runs.
+    const EVENT_TIMEOUT_SECS: u64 = 5;
+
+    /// Drain events from `rx` until one is found whose path is under
+    /// `dir`. Returns the first matching event, or panics on timeout.
+    async fn await_event_under(
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<WatchEvent>,
+        dir: &std::path::Path,
+        label: &str,
+    ) -> WatchEvent {
+        let dir_canon = canonical(dir);
+        let deadline = std::time::Instant::now() + Duration::from_secs(EVENT_TIMEOUT_SECS);
+        loop {
+            let remaining = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .unwrap_or(Duration::from_millis(0));
+            let evt = tokio::time::timeout(remaining, rx.recv())
+                .await
+                .unwrap_or_else(|_| panic!("timeout waiting for {label} under {dir_canon:?}"))
+                .expect("channel closed");
+            let evt_canon = canonical(&evt.path);
+            if evt_canon == dir_canon || evt_canon.starts_with(&dir_canon) {
+                return evt;
+            }
+            // Otherwise the event is unrelated noise (e.g. parent dir
+            // touch from tempdir setup); keep waiting.
+        }
+    }
+
     #[tokio::test]
     async fn detects_file_creation() {
         let dir = tempfile::tempdir().unwrap();
         let (tx, mut rx) = unbounded_channel::<WatchEvent>();
         let _watcher = FsWatcher::spawn(vec![dir.path().to_path_buf()], tx).expect("spawn failed");
 
-        // Wait briefly for the watcher to be ready (notify needs ~50ms on Linux).
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Wait briefly for the watcher to be ready (notify ~50ms Linux,
+        // FSEvents ~250ms macOS).
+        tokio::time::sleep(Duration::from_millis(300)).await;
 
         let new_file = dir.path().join("hello.txt");
         std::fs::write(&new_file, "hi").unwrap();
 
-        // Wait up to 2s for the event to arrive (debounce window + notify latency).
-        let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
-            .await
-            .expect("timeout waiting for event")
-            .expect("channel closed");
-
-        assert!(
-            event.path == new_file || event.path.parent() == Some(dir.path()),
-            "expected event for {new_file:?}, got {event:?}"
-        );
+        let _evt = await_event_under(&mut rx, dir.path(), "creation").await;
     }
 
     #[tokio::test]
@@ -296,20 +327,12 @@ mod tests {
         let (tx, mut rx) = unbounded_channel::<WatchEvent>();
         let _watcher = FsWatcher::spawn(vec![dir.path().to_path_buf()], tx).expect("spawn failed");
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
 
         // Modify after spawn.
         std::fs::write(&existing_file, "modified").unwrap();
 
-        let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
-            .await
-            .expect("timeout waiting for modification event")
-            .expect("channel closed");
-
-        assert!(
-            event.path == existing_file || event.path.parent() == Some(dir.path()),
-            "expected modification event for {existing_file:?}, got {event:?}"
-        );
+        let _evt = await_event_under(&mut rx, dir.path(), "modification").await;
     }
 
     #[tokio::test]
@@ -318,26 +341,17 @@ mod tests {
         let (tx, mut rx) = unbounded_channel::<WatchEvent>();
         let _watcher = FsWatcher::spawn(vec![dir.path().to_path_buf()], tx).expect("spawn failed");
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
 
         let file = dir.path().join("will_be_deleted.txt");
         std::fs::write(&file, "bye").unwrap();
 
-        // Drain any create event.
-        let _ = tokio::time::timeout(Duration::from_millis(800), rx.recv()).await;
-
+        // Wait for the create event, then trigger the delete.
+        let _ = await_event_under(&mut rx, dir.path(), "delete-precursor-create").await;
         std::fs::remove_file(&file).unwrap();
 
-        // At least one event (create or delete) must have arrived.
-        let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
-            .await
-            .expect("timeout waiting for delete event")
-            .expect("channel closed");
-
-        assert!(
-            event.path == file || event.path.parent() == Some(dir.path()),
-            "expected event for {file:?}, got {event:?}"
-        );
+        // At least one further event (the delete) must arrive.
+        let _evt = await_event_under(&mut rx, dir.path(), "deletion").await;
     }
 
     #[tokio::test]
