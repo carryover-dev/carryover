@@ -224,6 +224,43 @@ impl Ledger {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
+
+    /// Upsert cursor JSON for `(tool, session_id)`. The cursor is an opaque
+    /// JSON blob owned by the adapter; the ledger stores and retrieves it
+    /// without interpreting its contents.
+    pub fn save_cursor(
+        &self,
+        tool: &str,
+        session_id: &str,
+        cursor_json: &str,
+    ) -> Result<(), StorageError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO cursors (tool, session_id, cursor_json)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(tool, session_id) DO UPDATE SET cursor_json = excluded.cursor_json",
+            params![tool, session_id, cursor_json],
+        )?;
+        Ok(())
+    }
+
+    /// Load the stored cursor JSON for `(tool, session_id)`.
+    /// Returns `None` if no cursor has been saved yet (first run).
+    pub fn load_cursor(
+        &self,
+        tool: &str,
+        session_id: &str,
+    ) -> Result<Option<String>, StorageError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare_cached(
+            "SELECT cursor_json FROM cursors WHERE tool = ?1 AND session_id = ?2",
+        )?;
+        match stmt.query_row(params![tool, session_id], |row| row.get::<_, String>(0)) {
+            Ok(s) => Ok(Some(s)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StorageError::Sqlite(e)),
+        }
+    }
 }
 
 /// Map a rusqlite `Row` to a `LedgerRow`.

@@ -1,20 +1,18 @@
 //! `carryover start` — runs the daemon in the foreground.
 //!
 //! Spawns the hook endpoint (axum::serve on bind_loopback), the fs
-//! watcher (notify across all configured tool transcript roots), and a
-//! pipeline-stub worker that just drains the channels. The full
-//! pipeline (writes ledger rows, runs distillers, calls publish())
-//! lands in a follow-up PR; for v0.1 the stub keeps the channels
-//! healthy so the daemon survives the systemd-managed lifetime.
-//!
-//! Integration smoke tests belong in `tests/cross_tool.rs` (future PR)
-//! since they require binding a real port and spawning long-lived tasks.
+//! watcher (notify across all configured tool transcript roots), and the
+//! pipeline worker that ingests events → ledger → distillers → handoff.
+
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tokio::signal;
 use tokio::sync::mpsc::unbounded_channel;
 
-use crate::daemon::{fs_watcher::FsWatcher, hook_endpoint};
+use crate::cli::config::Config;
+use crate::daemon::{fs_watcher::FsWatcher, hook_endpoint, pipeline::Pipeline};
+use crate::storage::Ledger;
 
 pub async fn run() -> Result<()> {
     println!("Carryover daemon starting...");
@@ -30,6 +28,14 @@ pub async fn run() -> Result<()> {
     let (hook_tx, mut hook_rx) = unbounded_channel::<hook_endpoint::HookEvent>();
     let (watcher_tx, mut watcher_rx) = unbounded_channel::<crate::daemon::fs_watcher::WatchEvent>();
 
+    // Open ledger and build pipeline.
+    let ledger_path = Ledger::default_path().context("resolve ledger path")?;
+    let ledger = Ledger::open(&ledger_path).context("open ledger")?;
+    let config_path = Config::default_path().context("resolve config path")?;
+    let config = Config::load_or_default(&config_path).context("load config")?;
+    let home_dir = dirs::home_dir().context("resolve home directory")?;
+    let pipeline = Arc::new(Pipeline::build(&config, ledger, home_dir));
+
     // Spawn fs watcher (best-effort — if no tool installed, log + continue).
     let watcher = match FsWatcher::spawn_for_all_tools(watcher_tx) {
         Ok(w) => {
@@ -42,16 +48,16 @@ pub async fn run() -> Result<()> {
         }
     };
 
-    // Pipeline stub: drain both channels until shutdown. Future PRs
-    // wire this into adapters → ledger → distillers → publish.
+    // Pipeline drain: process hook and fs events until shutdown.
+    let pl = pipeline.clone();
     let drain = tokio::spawn(async move {
         loop {
             tokio::select! {
-                Some(_evt) = hook_rx.recv() => {
-                    // TODO(daemon-pipeline): adapter dispatch + ledger write.
+                Some(evt) = hook_rx.recv() => {
+                    pl.process_hook(&evt);
                 }
-                Some(_evt) = watcher_rx.recv() => {
-                    // TODO(daemon-pipeline): same as above for fs events.
+                Some(evt) = watcher_rx.recv() => {
+                    pl.process_watch(&evt);
                 }
                 else => break,
             }
