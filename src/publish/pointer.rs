@@ -58,6 +58,33 @@ pub fn ensure_pointer_block(path: &Path) -> std::io::Result<bool> {
     Ok(true)
 }
 
+/// Remove the Carryover pointer block from `path` if present.
+/// Returns true if the file was modified. No-ops if the file does not exist
+/// or the block was not found.
+pub fn remove_pointer_block(path: &Path) -> std::io::Result<bool> {
+    let existing = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    let Some((start, end)) = find_block_bounds(&existing) else {
+        return Ok(false);
+    };
+    let before = existing[..start].trim_end_matches('\n');
+    let after = &existing[end..];
+    let new_content = if after.trim().is_empty() {
+        if before.is_empty() {
+            String::new()
+        } else {
+            format!("{before}\n")
+        }
+    } else {
+        format!("{before}\n{after}")
+    };
+    write_atomic::write_no_follow(path, new_content.as_bytes())?;
+    Ok(true)
+}
+
 fn build_new_content(existing: &str) -> String {
     if let Some((start_byte, end_byte)) = find_block_bounds(existing) {
         let before = &existing[..start_byte];
@@ -203,5 +230,40 @@ mod tests {
         let err = ensure_pointer_block(&link).expect_err("symlink target must be rejected");
         assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
         assert_eq!(fs::read_to_string(&real).unwrap(), "original");
+    }
+
+    #[test]
+    fn remove_pointer_block_strips_block_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("AGENTS.md");
+        fs::write(&p, "# Existing content\n").unwrap();
+        ensure_pointer_block(&p).unwrap();
+
+        let modified = remove_pointer_block(&p).unwrap();
+        assert!(modified);
+
+        let body = fs::read_to_string(&p).unwrap();
+        assert!(!body.contains(POINTER_START), "block should be removed");
+        assert!(
+            body.contains("# Existing content"),
+            "other content preserved"
+        );
+    }
+
+    #[test]
+    fn remove_pointer_block_no_op_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("AGENTS.md");
+        fs::write(&p, "# No carryover block here\n").unwrap();
+        let modified = remove_pointer_block(&p).unwrap();
+        assert!(!modified);
+    }
+
+    #[test]
+    fn remove_pointer_block_no_op_on_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("nonexistent.md");
+        let modified = remove_pointer_block(&p).unwrap();
+        assert!(!modified);
     }
 }

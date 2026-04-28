@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 
 use super::config::Config;
 use super::hooks_writer;
+use crate::publish::remove_pointer_block;
 use crate::toolspec::specs::ALL_TOOLS;
 
 pub fn run(purge: bool) -> Result<()> {
@@ -54,6 +55,21 @@ pub fn run(purge: bool) -> Result<()> {
                 hooks_writer::remove_cursor_hooks(&config_path, &events).with_context(|| {
                     format!("remove cursor hooks from {}", config_path.display())
                 })?
+            }
+            "codex" => {
+                let notify_removed = hooks_writer::remove_codex_notify(&config_path, &home)
+                    .with_context(|| {
+                        format!("remove codex notify from {}", config_path.display())
+                    })?;
+                for md in &[
+                    home.join(".codex").join("AGENTS.md"),
+                    home.join("AGENTS.md"),
+                    home.join("CLAUDE.md"),
+                ] {
+                    remove_pointer_block(md)
+                        .with_context(|| format!("remove pointer block from {}", md.display()))?;
+                }
+                notify_removed
             }
             _ => false,
         };

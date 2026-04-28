@@ -7,7 +7,7 @@
 //!   be an array of matcher objects: `[{"matcher":"","hooks":[{"type":"command","command":"..."}]}]`
 //! - Cursor:      ~/.cursor/hooks.json     — JSON, hooks under "<eventName>"
 //!   as `{ "command": "...", "version": 1 }` objects. (Cursor B5 fix: TODO)
-//! - Codex:       ~/.codex/config.toml     — TOML; v0.1 SKIPS Codex stub writing.
+//! - Codex:       ~/.codex/config.toml     — TOML, `notify` array + AGENTS.md pointer
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -318,6 +318,141 @@ pub fn remove_cursor_hooks(path: &Path, events: &[&str]) -> Result<bool> {
     }
     write_json_atomic(path, &Value::Object(map))?;
     Ok(true)
+}
+
+/// Path of the Codex notify wrapper script.
+pub fn codex_wrapper_path(home: &Path) -> std::path::PathBuf {
+    home.join(".carryover")
+        .join("hooks")
+        .join("codex-notify.sh")
+}
+
+fn codex_wrapper_script() -> String {
+    format!(
+        "#!/usr/bin/env sh\nINPUT=$(cat)\ncurl -X POST -s -H 'Content-Type: application/json' \\\n  -d \"$INPUT\" http://127.0.0.1:{LOOPBACK_PORT}/hook/codex/turnEnd > /dev/null 2>&1\n"
+    )
+}
+
+/// Write the Codex notify wrapper script to `~/.carryover/hooks/codex-notify.sh`.
+pub fn write_codex_wrapper_script(home: &Path) -> Result<bool> {
+    let path = codex_wrapper_path(home);
+    let content = codex_wrapper_script();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).context("create hooks dir")?;
+    }
+    let needs_write = match std::fs::read_to_string(&path) {
+        Ok(existing) => existing != content,
+        Err(_) => true,
+    };
+    if !needs_write {
+        return Ok(false);
+    }
+    reject_symlink(&path)?;
+    std::fs::write(&path, &content).context("write codex notify script")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .context("chmod codex notify script")?;
+    }
+    Ok(true)
+}
+
+/// Write `notify = ["<wrapper-script>"]` into `~/.codex/config.toml`.
+///
+/// Uses `toml_edit` to preserve all existing comments and keys.
+/// Idempotent: if our wrapper path is already in the `notify` array, no-op.
+/// Returns `true` if the file was modified.
+pub fn write_codex_notify(config_path: &Path, home: &Path) -> Result<bool> {
+    use toml_edit::{Array, DocumentMut, Item, Value as TomlValue};
+
+    let wrapper = codex_wrapper_path(home);
+    let wrapper_str = wrapper.to_string_lossy().into_owned();
+
+    let raw = match std::fs::read_to_string(config_path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e).context("read codex config.toml"),
+    };
+
+    let mut doc: DocumentMut = raw.parse().context("parse codex config.toml as TOML")?;
+
+    // Check if our wrapper is already in the notify array.
+    let already_present = doc
+        .get("notify")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().any(|v| v.as_str() == Some(wrapper_str.as_str())))
+        .unwrap_or(false);
+
+    if already_present {
+        return Ok(false);
+    }
+
+    // Get or create the notify array, then append our wrapper.
+    match doc.get_mut("notify") {
+        Some(Item::Value(TomlValue::Array(arr))) => {
+            arr.push(wrapper_str.as_str());
+        }
+        None => {
+            let mut arr = Array::new();
+            arr.push(wrapper_str.as_str());
+            doc["notify"] = toml_edit::value(arr);
+        }
+        Some(other) => {
+            // notify exists but is not an array — replace with our array.
+            let _ = other;
+            let mut arr = Array::new();
+            arr.push(wrapper_str.as_str());
+            doc["notify"] = toml_edit::value(arr);
+        }
+    }
+
+    reject_symlink(config_path)?;
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).context("create codex config dir")?;
+    }
+    std::fs::write(config_path, doc.to_string()).context("write codex config.toml")?;
+    Ok(true)
+}
+
+/// Remove our wrapper from the `notify` array in `~/.codex/config.toml`.
+/// Returns `true` if the file was modified.
+pub fn remove_codex_notify(config_path: &Path, home: &Path) -> Result<bool> {
+    use toml_edit::{DocumentMut, Item, Value as TomlValue};
+
+    let wrapper = codex_wrapper_path(home);
+    let wrapper_str = wrapper.to_string_lossy().into_owned();
+
+    let raw = match std::fs::read_to_string(config_path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e).context("read codex config.toml"),
+    };
+
+    let mut doc: DocumentMut = raw.parse().context("parse codex config.toml as TOML")?;
+
+    if let Some(Item::Value(TomlValue::Array(arr))) = doc.get_mut("notify") {
+        let before = arr.len();
+        // Build a new array without our entry.
+        let keep: Vec<String> = arr
+            .iter()
+            .filter(|v| v.as_str() != Some(wrapper_str.as_str()))
+            .map(|v| v.as_str().unwrap_or("").to_string())
+            .collect();
+        if keep.len() == before {
+            return Ok(false);
+        }
+        let mut new_arr = toml_edit::Array::new();
+        for s in &keep {
+            new_arr.push(s.as_str());
+        }
+        *arr = new_arr;
+        reject_symlink(config_path)?;
+        std::fs::write(config_path, doc.to_string()).context("write codex config.toml")?;
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 fn write_json_atomic(path: &Path, value: &Value) -> Result<()> {
@@ -660,5 +795,94 @@ mod tests {
         let p = dir.path().join("hooks.json");
         let result = remove_cursor_hooks(&p, &["beforeSubmitPrompt"]).unwrap();
         assert!(!result);
+    }
+
+    // ---- write_codex_notify / remove_codex_notify -------------------------
+
+    #[test]
+    fn write_codex_notify_creates_config_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let config = home.join(".codex").join("config.toml");
+
+        let first = write_codex_notify(&config, home).unwrap();
+        assert!(first, "first call should create file");
+
+        let raw = std::fs::read_to_string(&config).unwrap();
+        let wrapper = codex_wrapper_path(home);
+        assert!(
+            raw.contains(&*wrapper.to_string_lossy()),
+            "notify should contain our wrapper path"
+        );
+
+        let second = write_codex_notify(&config, home).unwrap();
+        assert!(!second, "second call should be no-op");
+    }
+
+    #[test]
+    fn write_codex_notify_preserves_existing_keys_and_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let config = home.join("config.toml");
+        std::fs::write(&config, "# my codex config\nsome_key = \"value\"\n").unwrap();
+
+        write_codex_notify(&config, home).unwrap();
+
+        let raw = std::fs::read_to_string(&config).unwrap();
+        assert!(raw.contains("# my codex config"), "comment preserved");
+        assert!(raw.contains("some_key"), "existing key preserved");
+        assert!(raw.contains("notify"), "notify key added");
+    }
+
+    #[test]
+    fn write_codex_notify_appends_to_existing_notify_array() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let config = home.join("config.toml");
+        std::fs::write(&config, "notify = [\"other-script.sh\"]\n").unwrap();
+
+        write_codex_notify(&config, home).unwrap();
+
+        let raw = std::fs::read_to_string(&config).unwrap();
+        assert!(raw.contains("other-script.sh"), "existing entry preserved");
+        let wrapper = codex_wrapper_path(home);
+        assert!(raw.contains(&*wrapper.to_string_lossy()), "our entry added");
+    }
+
+    #[test]
+    fn remove_codex_notify_removes_our_entry_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let config = home.join("config.toml");
+        std::fs::write(&config, "notify = [\"other-script.sh\"]\n").unwrap();
+
+        write_codex_notify(&config, home).unwrap();
+        let removed = remove_codex_notify(&config, home).unwrap();
+        assert!(removed, "should report modification");
+
+        let raw = std::fs::read_to_string(&config).unwrap();
+        assert!(raw.contains("other-script.sh"), "foreign entry preserved");
+        let wrapper = codex_wrapper_path(home);
+        assert!(
+            !raw.contains(&*wrapper.to_string_lossy()),
+            "our entry removed"
+        );
+    }
+
+    #[test]
+    fn write_codex_wrapper_script_is_idempotent_and_contains_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+
+        let first = write_codex_wrapper_script(home).unwrap();
+        assert!(first);
+        let second = write_codex_wrapper_script(home).unwrap();
+        assert!(!second, "idempotent");
+
+        let content = std::fs::read_to_string(codex_wrapper_path(home)).unwrap();
+        assert!(
+            content.contains("/hook/codex/turnEnd"),
+            "script must POST to turnEnd"
+        );
     }
 }

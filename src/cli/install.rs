@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use super::config::Config;
 use super::hooks_writer;
+use crate::publish::ensure_pointer_block;
 use crate::toolspec::specs::ALL_TOOLS;
 
 pub fn run() -> Result<()> {
@@ -97,9 +98,20 @@ pub fn run() -> Result<()> {
                     .with_context(|| format!("write cursor hooks to {}", config_path.display()))?
             }
             "codex" => {
-                // TODO(codex-toml): wire up after toml crate lands in a follow-up PR.
-                eprintln!("  codex: skipping hook stub write (TOML editing lands in a follow-up)");
-                false
+                hooks_writer::write_codex_wrapper_script(&home)
+                    .with_context(|| "write codex notify script")?;
+                let notify_modified = hooks_writer::write_codex_notify(&config_path, &home)
+                    .with_context(|| format!("write codex notify to {}", config_path.display()))?;
+                // Pointer blocks: ~/.codex/AGENTS.md, ~/AGENTS.md, ~/CLAUDE.md
+                for md in &[
+                    home.join(".codex").join("AGENTS.md"),
+                    home.join("AGENTS.md"),
+                    home.join("CLAUDE.md"),
+                ] {
+                    ensure_pointer_block(md)
+                        .with_context(|| format!("write pointer block to {}", md.display()))?;
+                }
+                notify_modified
             }
             _ => false,
         };
