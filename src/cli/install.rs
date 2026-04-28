@@ -116,6 +116,20 @@ pub fn run() -> Result<()> {
     cfg.save(&cfg_path).context("save config")?;
     println!("Config saved to {}", cfg_path.display());
 
+    #[cfg(target_os = "linux")]
+    {
+        use crate::install::systemd;
+        match systemd::write_unit_file() {
+            Ok(path) => println!("Wrote systemd unit to {}", path.display()),
+            Err(e) => eprintln!("Could not write systemd unit: {e}"),
+        }
+        match systemd::enable_and_start() {
+            Ok(true) => println!("Daemon enabled and started via systemctl --user."),
+            Ok(false) => eprintln!("systemctl not available; daemon not auto-started."),
+            Err(e) => eprintln!("Could not enable/start daemon via systemctl: {e}"),
+        }
+    }
+
     Ok(())
 }
 

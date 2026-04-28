@@ -5,6 +5,7 @@ pub mod adapters;
 pub mod cli;
 pub mod daemon;
 pub mod distill;
+pub mod install;
 pub mod publish;
 pub mod storage;
 pub mod toolspec;

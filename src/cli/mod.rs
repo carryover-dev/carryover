@@ -8,7 +8,9 @@ pub mod config;
 pub mod hooks_writer;
 pub mod install;
 pub mod refresh;
+pub mod start;
 pub mod status;
+pub mod stop;
 pub mod uninstall;
 
 #[derive(Parser, Debug)]
@@ -57,14 +59,8 @@ pub async fn run() -> Result<()> {
         Commands::Install => install::run().context("install failed"),
         Commands::Refresh => refresh::run().context("refresh failed"),
         Commands::Status => status::run().context("status failed"),
-        Commands::Start => {
-            eprintln!("not yet implemented: start (lands with the systemd unit PR)");
-            Ok(())
-        }
-        Commands::Stop => {
-            eprintln!("not yet implemented: stop (lands with the systemd unit PR)");
-            Ok(())
-        }
+        Commands::Start => start::run().await.context("start failed"),
+        Commands::Stop => stop::run().context("stop failed"),
         Commands::Uninstall { purge } => uninstall::run(purge).context("uninstall failed"),
     }
 }
