@@ -32,6 +32,7 @@ thiserror = "1"
 anyhow = "1"
 tempfile = "3"
 chrono = { version = "0.4", features = ["serde"] }
+toml_edit = "0.22"
 
 [dev-dependencies]
 assert_cmd = "2.2.1"
