@@ -17,10 +17,13 @@ use crate::adapters::AdapterKind;
 use crate::cli::config::Config;
 use crate::daemon::{fs_watcher::WatchEvent, hook_endpoint::HookEvent};
 use crate::distill::{
-    failed_approaches::extract_failed_approaches, git_context::extract_git_context,
-    next_action::extract_next_action, open_questions::extract_open_questions,
+    failed_approaches::extract_failed_approaches,
+    git_context::extract_git_context,
+    next_action::extract_next_action,
+    open_questions::extract_open_questions,
     progress_log::{build_progress_log, extract_progress_entries},
-    recent_files::extract_recent_files, task::extract_task,
+    recent_files::extract_recent_files,
+    task::extract_task,
 };
 use crate::publish::{publish, Distilled, PublishContext};
 use crate::storage::{Ledger, LedgerRow};
@@ -124,8 +127,13 @@ impl Pipeline {
         //   (b) the right project but a stale session file (new session = new UUID file).
         // Re-seed whenever either condition is true.
         let cursor_json = if tool == "claude" {
-            let canonical_home = self.home_dir.canonicalize().unwrap_or_else(|_| self.home_dir.clone());
-            let canonical_project = project_dir.canonicalize().unwrap_or_else(|_| project_dir.to_path_buf());
+            let canonical_home = self
+                .home_dir
+                .canonicalize()
+                .unwrap_or_else(|_| self.home_dir.clone());
+            let canonical_project = project_dir
+                .canonicalize()
+                .unwrap_or_else(|_| project_dir.to_path_buf());
             if canonical_project != canonical_home {
                 let expected_slug = canonical_project.to_string_lossy().replace('/', "-");
                 let newest = find_claude_project_transcript(&self.home_dir, project_dir);
@@ -134,12 +142,20 @@ impl Pipeline {
                 } else {
                     let cursor_fp = serde_json::from_str::<serde_json::Value>(&cursor_json)
                         .ok()
-                        .and_then(|v| v.get("file_path").and_then(|f| f.as_str()).map(|s| s.to_string()));
+                        .and_then(|v| {
+                            v.get("file_path")
+                                .and_then(|f| f.as_str())
+                                .map(|s| s.to_string())
+                        });
                     match (cursor_fp, &newest) {
                         // Wrong project
                         (Some(fp), _) if !fp.contains(&*expected_slug) => true,
                         // Right project but stale file (newer transcript exists)
-                        (Some(fp), Some(newest_path)) if fp != newest_path.to_string_lossy().as_ref() => true,
+                        (Some(fp), Some(newest_path))
+                            if fp != newest_path.to_string_lossy().as_ref() =>
+                        {
+                            true
+                        }
                         // No cursor at all
                         (None, _) => true,
                         _ => false,
@@ -151,7 +167,8 @@ impl Pipeline {
                             "file_path": transcript.to_string_lossy(),
                             "byte_offset": 0,
                             "last_uuid": null
-                        }).to_string()
+                        })
+                        .to_string()
                     } else {
                         cursor_json
                     }
@@ -193,7 +210,11 @@ impl Pipeline {
             .map(|r| r.session_id.as_str())
             .unwrap_or(session_id);
         let all_rows = self.ledger.query_session(real_session_id)?;
-        let rows = if all_rows.is_empty() { new_rows } else { &all_rows };
+        let rows = if all_rows.is_empty() {
+            new_rows
+        } else {
+            &all_rows
+        };
 
         let next_action = extract_next_action(rows);
 
@@ -249,9 +270,7 @@ impl Pipeline {
 fn find_claude_project_transcript(home_dir: &Path, project_dir: &Path) -> Option<PathBuf> {
     let projects_root = home_dir.join(".claude").join("projects");
     // Encode: "/home/rohit/workspace/test-web" → "-home-rohit-workspace-test-web"
-    let encoded = project_dir
-        .to_string_lossy()
-        .replace('/', "-");
+    let encoded = project_dir.to_string_lossy().replace('/', "-");
     let project_subdir = projects_root.join(&encoded);
     if !project_subdir.is_dir() {
         return None;
@@ -284,11 +303,7 @@ fn find_claude_project_transcript(home_dir: &Path, project_dir: &Path) -> Option
 /// - No cursor is stored yet for the tool.
 /// - The cursor JSON has no `file_path` key.
 /// - The decoded path does not exist as a directory.
-fn infer_project_dir_from_cursor(
-    ledger: &Ledger,
-    tool: &str,
-    home_dir: &Path,
-) -> Option<PathBuf> {
+fn infer_project_dir_from_cursor(ledger: &Ledger, tool: &str, home_dir: &Path) -> Option<PathBuf> {
     let cursor_json = ledger.load_cursor(tool, "default").ok()??;
     if cursor_json.is_empty() {
         return None;

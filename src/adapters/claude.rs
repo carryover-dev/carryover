@@ -627,7 +627,10 @@ mod tests {
         let (records, advanced) = a.read_new_records(&cursor).unwrap();
 
         // The fixture has 3 complete lines before the partial tail.
-        assert!(!records.is_empty(), "should return the complete lines before partial tail");
+        assert!(
+            !records.is_empty(),
+            "should return the complete lines before partial tail"
+        );
         assert_eq!(
             advanced.byte_offset, 798,
             "cursor must stop at last complete newline (798), got {}",

@@ -64,9 +64,7 @@ fn extract_text_from_content_array(s: &str) -> Option<String> {
     let arr: Vec<serde_json::Value> = serde_json::from_str(s).ok()?;
     let texts: Vec<&str> = arr
         .iter()
-        .filter(|item| {
-            item.get("type").and_then(|t| t.as_str()) == Some("text")
-        })
+        .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("text"))
         .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
         .collect();
     if texts.is_empty() {
@@ -147,7 +145,10 @@ mod tests {
         let rows = vec![make_row("assistant", content)];
         let result = extract_next_action(&rows);
         assert!(result.contains("Now compile it."), "got: {result}");
-        assert!(!result.contains("let x = 1"), "code fence not stripped: {result}");
+        assert!(
+            !result.contains("let x = 1"),
+            "code fence not stripped: {result}"
+        );
     }
 
     #[test]

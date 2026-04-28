@@ -81,10 +81,7 @@ fn extract_text_blocks(s: &str) -> Option<String> {
 fn ms_to_iso(ts_ms: i64) -> String {
     use chrono::{DateTime, TimeZone, Utc};
     let secs = ts_ms / 1000;
-    let dt: DateTime<Utc> = Utc
-        .timestamp_opt(secs, 0)
-        .single()
-        .unwrap_or_else(Utc::now);
+    let dt: DateTime<Utc> = Utc.timestamp_opt(secs, 0).single().unwrap_or_else(Utc::now);
     dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
@@ -208,7 +205,10 @@ mod tests {
         ];
         let log = build_progress_log(existing, &new_entries, "next step");
         let count = log.lines().filter(|l| l.starts_with("- [")).count();
-        assert_eq!(count, 2, "should have 2 entries (no duplicate), got:\n{log}");
+        assert_eq!(
+            count, 2,
+            "should have 2 entries (no duplicate), got:\n{log}"
+        );
     }
 
     #[test]
