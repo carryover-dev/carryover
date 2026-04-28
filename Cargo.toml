@@ -35,3 +35,4 @@ tempfile = "3"
 [dev-dependencies]
 assert_cmd = "2.2.1"
 predicates = "3.1.4"
+tower = { version = "0.5", features = ["util"] }
