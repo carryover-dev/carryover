@@ -21,27 +21,27 @@ class Carryover < Formula
   desc "Zero-LLM-token context-handoff daemon — resume any AI session across Claude Code, Cursor, and Codex"
   homepage "https://github.com/carryover-dev/carryover"
   license "Apache-2.0"
-  version "0.1.2"
+  version "0.1.3"
 
   on_macos do
     on_arm do
       url "https://github.com/carryover-dev/carryover/releases/download/v#{version}/carryoverd-v#{version}-aarch64-apple-darwin.tar.gz"
-      sha256 "56011ea56d600390864bc53e850efe0670f50fc913d169950c279a1607778baf"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
     on_intel do
       url "https://github.com/carryover-dev/carryover/releases/download/v#{version}/carryoverd-v#{version}-x86_64-apple-darwin.tar.gz"
-      sha256 "c13b403de1ae1cce944927b8b7a3f486e2e077d163cd47acea07a1efc7420d11"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/carryover-dev/carryover/releases/download/v#{version}/carryoverd-v#{version}-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "9c37926a7d97de5899f1bc5e29abd311ca105705ffc161add18406804d83d149"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
     on_intel do
       url "https://github.com/carryover-dev/carryover/releases/download/v#{version}/carryoverd-v#{version}-x86_64-unknown-linux-gnu.tar.gz"
-      sha256 "089b28ca195deadc729d518388398c901ecc06211930e3a3d2a2a6f46f352328"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
   end
 
