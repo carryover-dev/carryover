@@ -85,13 +85,22 @@ npm install -g carryover
 carryoverd install
 ```
 
-A single TUI question: *"Which AI agents do you use?"* — pre-checked with whatever Carryover detects on disk. Confirm and the daemon registers itself with systemd-user (on Linux), writes hook stubs into each tool's settings, and starts watching transcripts. macOS launchd autostart is on the v0.2 roadmap; on macOS the daemon runs in the foreground for now.
+A single TUI question: *"Which AI agents do you use?"* — pre-checked with whatever Carryover detects on disk. Confirm and the daemon registers itself with systemd-user (on Linux), writes hook stubs into each tool's settings, and starts watching transcripts.
+
+**macOS:** launchd autostart is on the v0.2 roadmap. After `carryoverd install`, start the daemon manually in a separate terminal (or background it):
+
+```sh
+carryoverd          # keep this terminal open, or…
+carryoverd &        # …run in the background
+```
 
 ```sh
 carryoverd status      # see what's installed and recent events
 carryoverd refresh     # re-detect tools after a tool upgrade
 carryoverd uninstall   # remove hooks; ledger preserved by default (--purge to wipe)
 ```
+
+> **Tip — resuming a session:** Carryover writes a pointer block into your project's `AGENTS.md` and `CLAUDE.md`. The AI reads it automatically at the start of a new conversation. To trigger it, open a new session and say something like **"let's start"**, **"continue"**, or **"what's next"** — that's enough for Claude Code, Cursor, or Codex to read the handoff and ask where you left off. Just saying "hi" won't trigger it.
 
 ## What works in v0.1
 

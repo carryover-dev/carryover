@@ -51,7 +51,7 @@ pub fn run() -> Result<()> {
     } else {
         println!();
         println!(
-            "Ledger does not exist yet — run `carryover install` and let the daemon capture events."
+            "Ledger does not exist yet — run `carryoverd install` and let the daemon capture events."
         );
     }
 
