@@ -63,15 +63,12 @@ cargo install carryover
 
 ### macOS
 
-The Homebrew tap ships shortly after the v0.1.0 Linux release. Until then, npm works on macOS:
-
 ```sh
-npm install -g carryover
-```
-
-```sh
-# After the tap publishes:
+# Homebrew (recommended)
 brew install carryover-dev/tap/carryover
+
+# OR npm — works if you already have Node installed
+npm install -g carryover
 ```
 
 > **macOS first-run note** — v0.1 binaries are signed with [cosign](https://github.com/sigstore/cosign) (free, transparent, open-source) but **not** with an Apple Developer ID. Gatekeeper may refuse to launch on first run. Strip the quarantine attribute once after install:
@@ -88,7 +85,7 @@ brew install carryover-dev/tap/carryover
 carryoverd install
 ```
 
-A single TUI question: *"Which AI agents do you use?"* — pre-checked with whatever Carryover detects on disk. Confirm and the daemon registers itself with systemd-user (on Linux), writes hook stubs into each tool's settings, and starts watching transcripts. macOS launchd registration ships with the Homebrew tap.
+A single TUI question: *"Which AI agents do you use?"* — pre-checked with whatever Carryover detects on disk. Confirm and the daemon registers itself with systemd-user (on Linux), writes hook stubs into each tool's settings, and starts watching transcripts. macOS launchd autostart is on the v0.2 roadmap; on macOS the daemon runs in the foreground for now.
 
 ```sh
 carryoverd status      # see what's installed and recent events
