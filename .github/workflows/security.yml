@@ -49,7 +49,9 @@ jobs:
           fetch-depth: 0
       # gitleaks-action v2 requires a paid license for organizations.
       # trufflehog OSS is free, well-maintained, and integrates the same way.
-      - uses: trufflesecurity/trufflehog@main
+      # Pinned to a versioned tag (NOT @main) so a malicious commit to the
+      # action repo cannot land in our CI without an explicit version bump.
+      - uses: trufflesecurity/trufflehog@v3.92.1
         with:
           path: ./
           base: ${{ github.event.pull_request.base.sha || github.event.before }}
