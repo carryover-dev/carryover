@@ -10,6 +10,12 @@ pub struct SessionWindowMap {
     inner: Mutex<HashMap<String, Instant>>,
 }
 
+impl Default for SessionWindowMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SessionWindowMap {
     pub fn new() -> Self {
         Self {
