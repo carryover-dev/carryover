@@ -21,7 +21,7 @@ class Carryover < Formula
   desc "Zero-LLM-token context-handoff daemon — resume any AI session across Claude Code, Cursor, and Codex"
   homepage "https://github.com/carryover-dev/carryover"
   license "Apache-2.0"
-  version "0.1.0"
+  version "0.1.1"
 
   on_macos do
     on_arm do
@@ -37,11 +37,11 @@ class Carryover < Formula
   on_linux do
     on_arm do
       url "https://github.com/carryover-dev/carryover/releases/download/v#{version}/carryoverd-v#{version}-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "8e3c5fa86993d0c1e75731e63bf0805cbe81748ea098701dae579fb97c71e82b"
+      sha256 "6cdf7c947676e3d69c105edd5f17df4842f2b1477fd385b64490480d87c11645"
     end
     on_intel do
       url "https://github.com/carryover-dev/carryover/releases/download/v#{version}/carryoverd-v#{version}-x86_64-unknown-linux-gnu.tar.gz"
-      sha256 "be07d62d1fc9c5366d7b900c96e61ae0365d1202db7641022439ef8b3b2bf73b"
+      sha256 "c1a99c1a2948e5190914fe20e0a75b23d01b9816be1113eda2ac06aacc058bf9"
     end
   end
 
