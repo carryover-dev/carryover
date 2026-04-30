@@ -19,7 +19,7 @@ mod handoff;
 mod pointer;
 mod write_atomic;
 
-pub use handoff::{render_handoff, Distilled, MAX_HANDOFF_LINES};
+pub use handoff::{render_handoff, render_preamble, Distilled, MAX_HANDOFF_LINES};
 pub use pointer::{
     ensure_pointer_block, ensure_pointer_block_relative, pointer_block, remove_pointer_block,
     POINTER_END, POINTER_START,
@@ -190,6 +190,7 @@ mod tests {
             failed_approaches: vec![],
             git_context: "branch publisher / clean".to_string(),
             progress_log: String::new(),
+            session_activity: vec![],
         }
     }
 

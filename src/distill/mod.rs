@@ -11,6 +11,7 @@
 //! - failed_approaches: surfaces tool errors and retry patterns
 //! - git_context: captures HEAD sha and diff stat for the project directory
 
+pub mod cursor_activity;
 pub mod failed_approaches;
 pub mod git_context;
 pub mod next_action;

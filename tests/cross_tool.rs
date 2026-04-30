@@ -68,6 +68,8 @@ fn parse_fixture_through_adapter(source_tool: &str) -> (Vec<LedgerRow>, &'static
                 file_path: fixture_root("codex").join("1-simple-session.jsonl"),
                 byte_offset: 0,
                 last_event_seq: 0,
+                history_offset: 0,
+                project_dir: None,
             };
             let (records, _) = adapter
                 .read_new_records(&cursor)
@@ -96,6 +98,7 @@ fn distill(rows: &[LedgerRow], source_tool: &str, cwd: Option<&Path>) -> Distill
         failed_approaches: extract_failed_approaches(rows),
         git_context: extract_git_context(rows, cwd),
         progress_log: String::new(),
+        session_activity: vec![],
     }
 }
 

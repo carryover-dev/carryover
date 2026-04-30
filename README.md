@@ -101,6 +101,8 @@ carryoverd uninstall   # remove hooks; ledger preserved by default (--purge to w
 ```
 
 > **Tip — resuming a session:** Carryover writes a pointer block into your project's `AGENTS.md` and `CLAUDE.md`. The AI reads it automatically at the start of a new conversation. To trigger it, open a new session and say something like **"let's start"**, **"continue"**, or **"what's next"** — that's enough for Claude Code, Cursor, or Codex to read the handoff and ask where you left off. Just saying "hi" won't trigger it.
+>
+> **Tip — already in a chat:** A long-running Cursor/Claude/Codex window won't re-read the pointer mid-conversation. Carryover keeps writing fresh updates to `.carryover/handoff.md` as you work, but the AI in that window doesn't see them until you tell it to. To pull in the latest state, just say **"read .carryover/handoff.md"** or **"check the carryover handoff for context"** — the AI will load the file and pick up everything that happened since the chat started, including work from your other tools.
 
 ## What works in v0.1
 

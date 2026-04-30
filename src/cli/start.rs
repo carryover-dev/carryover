@@ -36,6 +36,10 @@ pub async fn run() -> Result<()> {
     let home_dir = dirs::home_dir().context("resolve home directory")?;
     let pipeline = Arc::new(Pipeline::build(&config, ledger, home_dir));
 
+    // Refresh the preamble of every known handoff so template/rule updates
+    // propagate even when no new prompts arrive after a daemon restart.
+    pipeline.refresh_all_preambles();
+
     // Spawn fs watcher (best-effort — if no tool installed, log + continue).
     let watcher = match FsWatcher::spawn_for_all_tools(watcher_tx) {
         Ok(w) => {

@@ -226,6 +226,12 @@ static CODEX_CONFIG_PATH: PathSpec = PathSpec {
     windows: &[],
 };
 
+static CODEX_HISTORY_PATH: PathSpec = PathSpec {
+    linux: &["~/.codex/history.jsonl"],
+    macos: &["~/.codex/history.jsonl"],
+    windows: &[],
+};
+
 static CODEX_TRANSCRIPT_PATH: PathSpec = PathSpec {
     linux: &["~/.codex/sessions/"],
     macos: &["~/.codex/sessions/"],
@@ -254,7 +260,7 @@ pub static CODEX: ToolSpec = ToolSpec {
     detect_binary: &["codex"],
     detect_version: detect_version_codex,
     config_paths: &[CODEX_CONFIG_PATH],
-    transcript_paths: &[CODEX_TRANSCRIPT_PATH],
+    transcript_paths: &[CODEX_TRANSCRIPT_PATH, CODEX_HISTORY_PATH],
     hooks_by_version: &CODEX_HOOKS,
 };
 

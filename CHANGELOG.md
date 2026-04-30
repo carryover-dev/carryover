@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once v0.1.0 ships.
 
+## 0.1.4 — 2026-04-30
+
+### Fixed
+
+- **Cursor adapter rewritten for new schema.** Cursor migrated conversation data from `globalStorage/state.vscdb` to per-workspace `state.vscdb` files. The adapter now reads `composer.composerHeaders` from the global DB and `aiService.prompts` from each workspace DB. Old-schema fallback preserved for pre-migration installs.
+- **Codex adapter rewritten for new schema.** New format stores user/assistant text in `event_msg.payload.{type, message}` with the session_id only in the leading `session_meta` line. Adapter now captures both, plus reads `~/.codex/history.jsonl` for real-time user prompts before the rollout file is flushed.
+- **Project-dir routing.** Cursor and Codex cursors persist `project_dir` so fs-watcher events route the handoff to the correct project directory. Watched paths now include `~/.config/Cursor/User/workspaceStorage` and `~/.codex/history.jsonl`.
+- **Progress log accumulates across all sessions.** No longer wipes content on session change — never resets, only appends. Entries deduped by full-line content.
+- **Skip-on-error in Claude/Codex adapters.** A single corrupt JSON line no longer blocks the entire transcript ingest.
+
+### Added
+
+- **Task / Next action accumulation.** Both sections now keep a timestamped history (newest first) instead of overwriting on each ingest. Dedupe checks the full list, not just the latest entry.
+- **`## Session activity` section.** Captures concrete file changes via `git diff --stat HEAD` (git projects) or recent file mtimes (non-git). Fills the gap for Cursor where AI responses aren't stored locally. Preserved across ingests when the recent-window scan is empty.
+- **Strict response rules in handoff preamble.** AI agents are instructed to read silently, not narrate the file structure, not recap files the user already knows, not report empty fields, and reply in two short paragraphs in the user's tone. Preamble auto-refreshes on every daemon start so rule updates propagate immediately.
+- **Fallback for empty `Next action`.** When no assistant text is captured (Cursor case), falls back to `"Continue: <latest user prompt>"` so the section is never empty.
+
 ## 0.1.3 — 2026-04-28
 
 ### Fixed

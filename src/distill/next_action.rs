@@ -55,6 +55,28 @@ pub fn extract_next_action(rows: &[LedgerRow]) -> String {
 
         return truncate_at_word(text, MAX_NEXT_ACTION_CHARS);
     }
+
+    // No assistant text found (e.g., Cursor sessions don't store responses
+    // locally). Fall back to the latest user prompt so the handoff still has
+    // a meaningful "Next action" — the user's most recent intent.
+    for row in rows.iter().rev() {
+        if row.role != "user" {
+            continue;
+        }
+        let trimmed = row.content.trim();
+        if trimmed.is_empty() || trimmed.starts_with('[') {
+            continue; // skip tool-result wrappers
+        }
+        let first_line = trimmed.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+        if first_line.is_empty() {
+            continue;
+        }
+        return format!(
+            "Continue: {}",
+            truncate_at_word(first_line.trim(), MAX_NEXT_ACTION_CHARS - 10)
+        );
+    }
+
     NO_NEXT_ACTION_SENTINEL.to_string()
 }
 
@@ -189,8 +211,21 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_sentinel_when_no_assistant() {
+    fn falls_back_to_user_prompt_when_no_assistant() {
+        // For Cursor-style sessions where AI responses aren't stored locally,
+        // we fall back to the latest user prompt prefixed with "Continue: ".
         let rows = vec![make_row("user", "what should I do?")];
+        let result = extract_next_action(&rows);
+        assert!(
+            result.starts_with("Continue: "),
+            "expected user-prompt fallback, got: {result}"
+        );
+        assert!(result.contains("what should I do?"));
+    }
+
+    #[test]
+    fn returns_sentinel_when_no_user_or_assistant() {
+        let rows = vec![make_row("system", "boot")];
         assert_eq!(extract_next_action(&rows), NO_NEXT_ACTION_SENTINEL);
     }
 

@@ -17,6 +17,7 @@ use crate::adapters::AdapterKind;
 use crate::cli::config::Config;
 use crate::daemon::{fs_watcher::WatchEvent, hook_endpoint::HookEvent};
 use crate::distill::{
+    cursor_activity::extract_cursor_activity,
     failed_approaches::extract_failed_approaches,
     git_context::extract_git_context,
     next_action::extract_next_action,
@@ -178,12 +179,62 @@ impl Pipeline {
             } else {
                 cursor_json
             }
+        } else if tool == "codex" {
+            // Codex stores each session in its own .jsonl. The cursor may be
+            // empty (first run) or stale (pointing at an older session). If
+            // either, find the newest codex transcript whose session_meta.cwd
+            // matches the project_dir and reseed.
+            let cursor_fp = serde_json::from_str::<serde_json::Value>(&cursor_json)
+                .ok()
+                .and_then(|v| {
+                    v.get("file_path")
+                        .and_then(|f| f.as_str())
+                        .map(|s| s.to_string())
+                })
+                .unwrap_or_default();
+            let newest = find_codex_session_transcript(&self.home_dir, project_dir);
+            let needs_reseed = match (&cursor_fp.is_empty(), &newest) {
+                (true, _) => true,
+                (false, Some(newest_path))
+                    if cursor_fp != newest_path.to_string_lossy().as_ref() =>
+                {
+                    true
+                }
+                _ => false,
+            };
+            if needs_reseed {
+                if let Some(transcript) = newest {
+                    serde_json::json!({
+                        "file_path": transcript.to_string_lossy(),
+                        "byte_offset": 0,
+                        "last_event_seq": 0,
+                    })
+                    .to_string()
+                } else {
+                    cursor_json
+                }
+            } else {
+                cursor_json
+            }
         } else {
             cursor_json
         };
 
         let (raw_records, new_cursor_json) = adapter.read_new_records_erased(&cursor_json)?;
         if raw_records.is_empty() {
+            // No new prompts, but the cursor (e.g. composer.lastUpdatedAt) may
+            // have advanced — Cursor often updates this after the AI responds
+            // and creates files. Save the advanced cursor and refresh the
+            // Session activity section so newly-created files are picked up.
+            if new_cursor_json != cursor_json && !new_cursor_json.is_empty() {
+                let _ = self.ledger.save_cursor(tool, session_id, &new_cursor_json);
+            }
+            // Resolve project_dir from adapter's new cursor (most reliable).
+            let refresh_dir = adapter_project_dir(&new_cursor_json, &self.home_dir)
+                .unwrap_or_else(|| project_dir.to_path_buf());
+            if refresh_dir != self.home_dir {
+                let _ = refresh_session_activity(&refresh_dir);
+            }
             return Ok(());
         }
 
@@ -192,8 +243,35 @@ impl Pipeline {
         self.ledger
             .save_cursor(tool, session_id, &new_cursor_json)?;
 
+        // If the adapter reports a project_dir in its new cursor, prefer that
+        // over the project_dir argument. The Cursor adapter knows the active
+        // workspace from composer.composerHeaders, which is more reliable than
+        // the cached "default" cursor (which can be stale or empty on first
+        // watch event after restart).
+        let project_dir_owned: PathBuf;
+        let project_dir: &Path = if let Some(adapter_dir) =
+            serde_json::from_str::<serde_json::Value>(&new_cursor_json)
+                .ok()
+                .and_then(|v| {
+                    v.get("project_dir")
+                        .and_then(|d| d.as_str())
+                        .map(|s| s.to_string())
+                }) {
+            let candidate = PathBuf::from(&adapter_dir);
+            if candidate.is_dir() && candidate != self.home_dir {
+                project_dir_owned = candidate;
+                &project_dir_owned
+            } else {
+                project_dir
+            }
+        } else {
+            project_dir
+        };
+
         // Cache project_dir for the fs-watcher path: hook events have the real
         // cwd but watch events use session_id="default" and must look it up.
+        // MERGE into the existing "default" cursor — overwriting would clobber
+        // file_path/byte_offset and force a re-read from byte 0 next time.
         if session_id != "default" {
             let canonical_home = self
                 .home_dir
@@ -203,11 +281,19 @@ impl Pipeline {
                 .canonicalize()
                 .unwrap_or_else(|_| project_dir.to_path_buf());
             if canonical_project != canonical_home {
-                let meta = serde_json::json!({
-                    "project_dir": project_dir.to_string_lossy()
-                })
-                .to_string();
-                let _ = self.ledger.save_cursor(tool, "default", &meta);
+                let existing = self
+                    .ledger
+                    .load_cursor(tool, "default")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let mut v: serde_json::Value = if existing.is_empty() {
+                    serde_json::json!({})
+                } else {
+                    serde_json::from_str(&existing).unwrap_or_else(|_| serde_json::json!({}))
+                };
+                v["project_dir"] = serde_json::json!(project_dir.to_string_lossy());
+                let _ = self.ledger.save_cursor(tool, "default", &v.to_string());
             }
         }
 
@@ -236,6 +322,8 @@ impl Pipeline {
         };
 
         let next_action = extract_next_action(rows);
+        let task = extract_task(rows);
+        let timestamp_iso = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
         // Build accumulated progress log: read existing file, append new entries.
         let progress_path = project_dir.join(".carryover").join("progress.md");
@@ -248,17 +336,40 @@ impl Pipeline {
             real_session_id,
         );
 
+        // Read existing handoff to accumulate Task and Next action history.
+        let handoff_path = project_dir.join(".carryover").join("handoff.md");
+        let existing_handoff = std::fs::read_to_string(&handoff_path).unwrap_or_default();
+        let accumulated_task =
+            accumulate_section(&existing_handoff, "## Task", &task, &timestamp_iso);
+        let accumulated_next_action = accumulate_section(
+            &existing_handoff,
+            "## Next action",
+            &next_action,
+            &timestamp_iso,
+        );
+
+        // Session activity: prefer fresh scan, but preserve existing when scan
+        // returns empty (e.g. files outside the recent-window). Never delete
+        // what's already there.
+        let fresh_activity = extract_cursor_activity(project_dir);
+        let session_activity = if fresh_activity.is_empty() {
+            preserved_session_activity(&existing_handoff)
+        } else {
+            fresh_activity
+        };
+
         let distilled = Distilled {
             source_tool: tool.to_string(),
             session_id: session_id.to_string(),
-            timestamp_iso: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
-            task: extract_task(rows),
+            timestamp_iso,
+            task: accumulated_task,
             open_questions: extract_open_questions(rows),
-            next_action: next_action.clone(),
+            next_action: accumulated_next_action,
             recent_files: extract_recent_files(rows),
             failed_approaches: extract_failed_approaches(rows),
             git_context: extract_git_context(rows, Some(Path::new(&self.home_dir))),
             progress_log,
+            session_activity,
         };
 
         let ctx = PublishContext {
@@ -286,6 +397,321 @@ impl Pipeline {
             .open(&self.events_log)
             .and_then(|mut f| f.write_all(line.as_bytes()));
     }
+}
+
+impl Pipeline {
+    /// Refresh the preamble (top-of-file resume protocol header + strict
+    /// response rules) of every known project's `.carryover/handoff.md`.
+    ///
+    /// Called on daemon start so that template/rule changes propagate to
+    /// existing handoff files without waiting for a new prompt.
+    pub fn refresh_all_preambles(&self) {
+        let projects = self.known_project_dirs();
+        let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        for (project_dir, source_tool) in projects {
+            let handoff_path = project_dir.join(".carryover").join("handoff.md");
+            if !handoff_path.exists() {
+                continue;
+            }
+            let _ = rewrite_preamble(&handoff_path, &source_tool, &self.resume_mode, &now);
+        }
+    }
+
+    /// Collect every (project_dir, source_tool) pair we have a cursor for.
+    fn known_project_dirs(&self) -> Vec<(PathBuf, String)> {
+        let mut out = Vec::new();
+        for tool in self.adapters.keys() {
+            if let Ok(Some(cursor_json)) = self.ledger.load_cursor(tool, "default") {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&cursor_json) {
+                    if let Some(dir_str) = v.get("project_dir").and_then(|d| d.as_str()) {
+                        let p = PathBuf::from(dir_str);
+                        if p.is_dir() {
+                            out.push((p, tool.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Replace everything before (and including) the first `\n---\n` separator
+/// with a freshly-rendered preamble. Idempotent — only writes if content changes.
+fn rewrite_preamble(
+    handoff_path: &Path,
+    source_tool: &str,
+    resume_mode: &str,
+    timestamp_iso: &str,
+) -> anyhow::Result<()> {
+    let content = std::fs::read_to_string(handoff_path)?;
+    let separator = "\n---\n";
+    let after = match content.find(separator) {
+        Some(i) => &content[i + separator.len()..],
+        None => return Ok(()), // file is too malformed to safely edit
+    };
+    let new_preamble = crate::publish::render_preamble(source_tool, resume_mode, timestamp_iso);
+    let updated = format!("{new_preamble}\n{after}");
+    if updated != content {
+        std::fs::write(handoff_path, updated)?;
+    }
+    Ok(())
+}
+
+/// Read the existing `## Session activity` block from a handoff file and
+/// return its bullet-line entries (one entry per element). Used to preserve
+/// the previous activity snapshot when a fresh scan returns empty.
+fn preserved_session_activity(existing_handoff: &str) -> Vec<String> {
+    let body = extract_section_content(existing_handoff, "## Session activity");
+    body.lines()
+        .map(|s| s.to_string())
+        .filter(|s| !s.trim().is_empty())
+        .collect()
+}
+
+/// Extract project_dir field from a serialized cursor JSON.
+/// Returns None if the field is missing, empty, or points at home_dir / a
+/// non-existent directory.
+fn adapter_project_dir(cursor_json: &str, home_dir: &Path) -> Option<PathBuf> {
+    let v: serde_json::Value = serde_json::from_str(cursor_json).ok()?;
+    let dir = v.get("project_dir").and_then(|d| d.as_str())?;
+    let candidate = PathBuf::from(dir);
+    if candidate.is_dir() && candidate != home_dir {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+/// Refresh just the `## Session activity` section of an existing handoff.md
+/// without re-running the full distill. Catches files created by the AI tool
+/// AFTER its prompt was captured (e.g., Cursor creates a file 5 seconds after
+/// you submit). Idempotent — only writes if the new section differs.
+fn refresh_session_activity(project_dir: &Path) -> anyhow::Result<()> {
+    let handoff_path = project_dir.join(".carryover").join("handoff.md");
+    if !handoff_path.exists() {
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(&handoff_path)?;
+    let new_activity = crate::distill::cursor_activity::extract_cursor_activity(project_dir);
+
+    // If the fresh scan is empty (e.g. nothing modified in the last 6h), do
+    // NOT wipe the existing section — leave the previous snapshot intact.
+    if new_activity.is_empty() {
+        return Ok(());
+    }
+
+    let mut new_section_body = String::from("## Session activity\n");
+    for line in &new_activity {
+        new_section_body.push_str(line);
+        new_section_body.push('\n');
+    }
+
+    let updated = replace_section(&content, "## Session activity", &new_section_body);
+    if updated != content {
+        std::fs::write(&handoff_path, updated)?;
+    }
+    Ok(())
+}
+
+/// Replace the contents of a `## Header` section in `text` with `new_section_body`.
+/// If the section doesn't exist and `new_section_body` is non-empty, insert it
+/// before the next section after `## Task` (best-effort).
+fn replace_section(text: &str, header: &str, new_section_body: &str) -> String {
+    let header_line = format!("{header}\n");
+    if let Some(start) = text.find(&header_line) {
+        // Find the end of this section: next "## " on its own line, or EOF.
+        let after = start + header_line.len();
+        let rest = &text[after..];
+        let end = rest
+            .match_indices("\n## ")
+            .next()
+            .map(|(i, _)| after + i + 1)
+            .unwrap_or(text.len());
+
+        let mut out = String::new();
+        out.push_str(&text[..start]);
+        if !new_section_body.is_empty() {
+            out.push_str(new_section_body);
+            // Ensure trailing blank line before next section.
+            if !out.ends_with("\n\n") {
+                out.push('\n');
+            }
+        }
+        out.push_str(&text[end..]);
+        out
+    } else if !new_section_body.is_empty() {
+        // No existing section — insert before "## Next action" if present, else append.
+        let insert_at = text
+            .find("## Next action")
+            .or_else(|| text.find("## Progress log"))
+            .unwrap_or(text.len());
+        let mut out = String::new();
+        out.push_str(&text[..insert_at]);
+        out.push_str(new_section_body);
+        out.push('\n');
+        out.push_str(&text[insert_at..]);
+        out
+    } else {
+        text.to_string()
+    }
+}
+
+/// Append a new value to an accumulating section of the handoff (Task / Next action).
+///
+/// Reads the existing section content from `existing_handoff`, prepends the new
+/// timestamped entry, and returns the combined block. Skips the append if the
+/// new value matches the most recent entry (dedupe by content). Empty new
+/// values are dropped — they don't create entries.
+///
+/// Output format:
+/// ```text
+/// - [2026-04-29T16:30:00Z] latest task
+/// - [2026-04-29T15:45:00Z] earlier task
+/// ```
+fn accumulate_section(
+    existing_handoff: &str,
+    header: &str,
+    new_value: &str,
+    timestamp_iso: &str,
+) -> String {
+    let new_value = new_value.trim();
+    let raw_existing = extract_section_content(existing_handoff, header);
+
+    // Keep ONLY clean bullet entries (drop orphan plain-text from old formats).
+    let bullet_lines: Vec<&str> = raw_existing
+        .lines()
+        .filter(|l| l.starts_with("- ["))
+        .collect();
+    let cleaned_existing = bullet_lines.join("\n");
+
+    // Empty / sentinel new values: keep existing bullets (don't append a no-op).
+    if new_value.is_empty() || new_value.starts_with("<no ") {
+        return cleaned_existing;
+    }
+
+    let first_line = new_value.lines().next().unwrap_or(new_value).trim();
+
+    // Dedupe against ALL existing values, not just the latest. The user's
+    // task or next_action may oscillate between two values across composers
+    // (e.g. "lets start" / "build cat app") and we don't want every flip
+    // appended again.
+    let new_value_norm = first_line.trim();
+    let already_present = bullet_lines.iter().any(|l| {
+        l.find("] ")
+            .map(|i| l[i + 2..].trim() == new_value_norm)
+            .unwrap_or(false)
+    });
+    if already_present {
+        return cleaned_existing;
+    }
+
+    let new_entry = format!("- [{timestamp_iso}] {first_line}");
+    if cleaned_existing.is_empty() {
+        new_entry
+    } else {
+        format!("{new_entry}\n{cleaned_existing}")
+    }
+}
+
+/// Extract the text between `## <header>` and the next `## ` header (or end).
+fn extract_section_content(text: &str, header: &str) -> String {
+    let needle = format!("{header}\n");
+    let start = match text.find(&needle) {
+        Some(i) => i + needle.len(),
+        None => return String::new(),
+    };
+    let rest = &text[start..];
+    // Find the next "## " on its own line.
+    let end = rest
+        .match_indices("\n## ")
+        .next()
+        .map(|(i, _)| i)
+        .unwrap_or(rest.len());
+    rest[..end].trim().to_string()
+}
+
+/// Find the newest Codex session transcript whose session_meta.cwd matches
+/// `project_dir`. Codex writes transcripts to
+/// `~/.codex/sessions/<year>/<month>/<day>/rollout-*.jsonl` — one file per
+/// session. Each starts with a `session_meta` line that includes `cwd`.
+///
+/// Walk recently-modified .jsonl files, peek the first line, return the
+/// newest one whose cwd matches. Falls back to newest globally if no match.
+fn find_codex_session_transcript(home_dir: &Path, project_dir: &Path) -> Option<PathBuf> {
+    let sessions_root = home_dir.join(".codex").join("sessions");
+    if !sessions_root.is_dir() {
+        return None;
+    }
+
+    // Collect candidate jsonl files with mtimes.
+    let mut candidates: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
+    walk_codex_sessions(&sessions_root, 0, &mut candidates);
+    if candidates.is_empty() {
+        return None;
+    }
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    // Limit how many we peek to avoid heavy I/O on long-lived installs.
+    candidates.truncate(20);
+
+    let target = project_dir
+        .canonicalize()
+        .unwrap_or_else(|_| project_dir.to_path_buf());
+    let target_str = target.to_string_lossy().to_string();
+
+    // Prefer transcripts where session_meta.cwd matches.
+    for (_, path) in &candidates {
+        if let Some(cwd) = peek_codex_session_cwd(path) {
+            if cwd == target_str {
+                return Some(path.clone());
+            }
+        }
+    }
+
+    // No cwd-match — fall back to the newest transcript globally.
+    candidates.into_iter().next().map(|(_, p)| p)
+}
+
+fn walk_codex_sessions(cur: &Path, depth: usize, out: &mut Vec<(std::time::SystemTime, PathBuf)>) {
+    if depth > 4 {
+        return;
+    }
+    let read_dir = match std::fs::read_dir(cur) {
+        Ok(rd) => rd,
+        Err(_) => return,
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.is_dir() {
+            walk_codex_sessions(&path, depth + 1, out);
+        } else if meta.is_file() && path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+            if let Ok(mtime) = meta.modified() {
+                out.push((mtime, path));
+            }
+        }
+    }
+}
+
+/// Read the first line of a Codex session jsonl, parse session_meta, return cwd.
+fn peek_codex_session_cwd(path: &Path) -> Option<String> {
+    use std::io::{BufRead, BufReader};
+    let f = std::fs::File::open(path).ok()?;
+    let mut reader = BufReader::new(f);
+    let mut line = String::new();
+    reader.read_line(&mut line).ok()?;
+    let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) != Some("session_meta") {
+        return None;
+    }
+    v.get("payload")
+        .and_then(|p| p.get("cwd"))
+        .and_then(|c| c.as_str())
+        .map(String::from)
 }
 
 /// Find the newest Claude transcript for a specific project directory.

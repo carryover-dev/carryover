@@ -28,12 +28,22 @@ const MAX_READ_BYTES_PER_POLL: u64 = 64 * 1024 * 1024;
 /// Read-position cursor for a single Codex transcript file.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CodexCursor {
-    /// Path to the JSONL transcript file.
+    /// Path to the JSONL transcript file (rollout file).
     pub file_path: PathBuf,
-    /// Byte offset of the first byte NOT yet consumed (exclusive lower bound).
+    /// Byte offset of the first byte NOT yet consumed in the rollout file.
     pub byte_offset: u64,
     /// Highest `seq` value seen in `event_msg` rows so far.
     pub last_event_seq: i64,
+    /// Byte offset of the first byte NOT yet consumed in `~/.codex/history.jsonl`.
+    /// Codex appends user prompts here in real-time, before the rollout file
+    /// gets flushed — reading this catches prompts the user just submitted.
+    #[serde(default)]
+    pub history_offset: u64,
+    /// Project directory of the active Codex session. Read from the rollout
+    /// file's `session_meta.payload.cwd` so fs-watcher events can route the
+    /// handoff back to the correct project.
+    #[serde(default)]
+    pub project_dir: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +125,8 @@ impl Adapter for CodexAdapter {
                     file_path: file_path.clone(),
                     byte_offset: 0,
                     last_event_seq: since.last_event_seq,
+                    history_offset: since.history_offset,
+                    project_dir: since.project_dir.clone(),
                 },
             ));
         }
@@ -140,31 +152,85 @@ impl Adapter for CodexAdapter {
 
         let mut last_event_seq = since.last_event_seq;
 
-        let records: Vec<RawRecord> = line_records
-            .into_iter()
-            .map(|(end_offset, bytes)| {
-                // Track last_event_seq from event_msg rows as they come in.
-                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                    if v.get("type").and_then(|t| t.as_str()) == Some("event_msg") {
-                        if let Some(seq) = v.get("seq").and_then(|s| s.as_i64()) {
-                            if seq > last_event_seq {
-                                last_event_seq = seq;
-                            }
+        // Codex transcripts begin with a session_meta line that carries the
+        // session_id. When reading incrementally (offset > 0) we skip past it
+        // and parse() loses session context. Inject a synthetic session_meta
+        // record at the top of the batch ONLY when there are real records to
+        // process — never inject for an empty batch (preserves idempotency).
+        let mut records: Vec<RawRecord> = Vec::with_capacity(line_records.len() + 1);
+        if since.byte_offset > 0 && !line_records.is_empty() {
+            if let Some(meta_line) = peek_first_line(file_path) {
+                records.push(RawRecord {
+                    tool: self.name().to_string(),
+                    payload: meta_line.into_bytes(),
+                    offset: 0,
+                });
+            }
+        }
+
+        records.extend(line_records.into_iter().map(|(end_offset, bytes)| {
+            // Track last_event_seq from event_msg rows as they come in.
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                if v.get("type").and_then(|t| t.as_str()) == Some("event_msg") {
+                    if let Some(seq) = v.get("seq").and_then(|s| s.as_i64()) {
+                        if seq > last_event_seq {
+                            last_event_seq = seq;
                         }
                     }
                 }
-                RawRecord {
-                    tool: self.name().to_string(),
-                    payload: bytes,
-                    offset: end_offset,
+            }
+            RawRecord {
+                tool: self.name().to_string(),
+                payload: bytes,
+                offset: end_offset,
+            }
+        }));
+
+        // Also read ~/.codex/history.jsonl for real-time user prompts. Codex
+        // appends to this file on every prompt submission, BEFORE the rollout
+        // file is flushed. Without this, recent prompts are missed.
+        // Skip in tests: when sessions_root is overridden, the adapter is
+        // pointing at a fixture and shouldn't read the dev machine's history.
+        let mut new_history_offset = since.history_offset;
+        if self.sessions_root.is_none() {
+            if let Some(home) = dirs::home_dir() {
+                let history_path = home.join(".codex").join("history.jsonl");
+                if history_path.exists() {
+                    if let Ok((hist_lines, advanced)) =
+                        read_complete_lines(&history_path, since.history_offset, self.name())
+                    {
+                        new_history_offset = advanced;
+                        for (end_offset, bytes) in hist_lines {
+                            // Wrap in a marker so parse() knows it's history-format.
+                            // Format: {"_codex_history": true, "line": <original>}
+                            let mut wrapped = b"{\"_codex_history\":true,\"line\":".to_vec();
+                            // Escape the original bytes as JSON string content.
+                            let original = String::from_utf8_lossy(&bytes);
+                            let escaped = serde_json::to_string(&original.trim())
+                                .unwrap_or_else(|_| "\"\"".to_string());
+                            wrapped.extend_from_slice(escaped.as_bytes());
+                            wrapped.push(b'}');
+                            records.push(RawRecord {
+                                tool: self.name().to_string(),
+                                payload: wrapped,
+                                offset: end_offset,
+                            });
+                        }
+                    }
                 }
-            })
-            .collect();
+            }
+        }
+
+        // Peek the rollout's session_meta line for cwd → routes handoff to
+        // the correct project on subsequent fs-watcher events.
+        let new_project_dir = peek_session_cwd(file_path).or(since.project_dir.clone());
 
         let advanced = CodexCursor {
             file_path: file_path.clone(),
             byte_offset: new_offset,
             last_event_seq,
+            history_offset: new_history_offset,
+            project_dir: new_project_dir,
         };
 
         Ok((records, advanced))
@@ -183,71 +249,149 @@ impl Adapter for CodexAdapter {
     /// Missing session_meta is recorded in the daemon event log (v0.2).
     fn parse(&self, records: Vec<RawRecord>) -> Result<Vec<LedgerRow>, AdapterError> {
         let mut rows = Vec::with_capacity(records.len());
+        // Captured from session_meta.payload.id; applied to subsequent event_msg
+        // lines that don't carry session_id at the top level (new Codex schema).
+        let mut current_session_id: String = String::new();
 
         for rec in records {
-            let v: serde_json::Value =
-                serde_json::from_slice(&rec.payload).map_err(|e| AdapterError::Parse {
-                    offset: rec.offset,
-                    context: "invalid JSON in transcript line",
-                    source: e,
-                })?;
+            let v: serde_json::Value = match serde_json::from_slice(&rec.payload) {
+                Ok(v) => v,
+                Err(_) => continue, // skip corrupt JSON line
+            };
+
+            // History-format wrapper: {"_codex_history": true, "line": "<json>"}
+            // Each line is `{session_id, ts, text}` from ~/.codex/history.jsonl.
+            if v.get("_codex_history").and_then(|b| b.as_bool()) == Some(true) {
+                let inner_str = v.get("line").and_then(|l| l.as_str()).unwrap_or("");
+                if inner_str.is_empty() {
+                    continue;
+                }
+                let inner: serde_json::Value = match serde_json::from_str(inner_str) {
+                    Ok(x) => x,
+                    Err(_) => continue,
+                };
+                let sid = inner
+                    .get("session_id")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let ts_secs = inner.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
+                let text = inner
+                    .get("text")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if sid.is_empty() || text.is_empty() {
+                    continue;
+                }
+                rows.push(LedgerRow {
+                    session_id: sid,
+                    tool: "codex".to_string(),
+                    ts: ts_secs * 1000, // history.jsonl uses unix seconds
+                    role: "user".to_string(),
+                    content: text,
+                    tool_calls_json: None,
+                    files_touched_json: None,
+                    parent_id: None,
+                });
+                continue;
+            }
 
             let row_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
             match row_type {
                 "session_meta" => {
-                    // Consumed for context; does not produce a LedgerRow.
-                    // session_id is carried per-event_msg for robustness.
+                    // New schema: payload.id is the session id; old schema may put
+                    // it at top-level "session_id".
+                    if let Some(sid) = v
+                        .get("payload")
+                        .and_then(|p| p.get("id"))
+                        .and_then(|i| i.as_str())
+                        .or_else(|| v.get("session_id").and_then(|s| s.as_str()))
+                    {
+                        current_session_id = sid.to_string();
+                    }
                     continue;
                 }
                 "event_msg" => {
-                    // Required: session_id
-                    let session_id = v
-                        .get("session_id")
-                        .and_then(|s| s.as_str())
-                        .ok_or_else(|| AdapterError::Parse {
-                            offset: rec.offset,
-                            context: "missing session_id field",
-                            source: make_missing_field_error(),
-                        })?
-                        .to_string();
-
-                    // Required: ts (unix epoch ms as i64)
-                    let ts = parse_timestamp(v.get("ts"), rec.offset)?;
-
-                    // Required: role
-                    let role = v
-                        .get("role")
-                        .and_then(|r| r.as_str())
-                        .ok_or_else(|| AdapterError::Parse {
-                            offset: rec.offset,
-                            context: "missing role field",
-                            source: make_missing_field_error(),
-                        })?
-                        .to_string();
-
-                    // content: string or array (Codex always uses strings in v0.1)
-                    let content_val = v.get("content");
-                    let content = match content_val {
-                        None => String::new(),
-                        Some(serde_json::Value::String(s)) => s.clone(),
-                        Some(arr) => {
-                            serde_json::to_string(arr).map_err(|e| AdapterError::Parse {
-                                offset: rec.offset,
-                                context: "failed to serialize content array",
-                                source: e,
-                            })?
-                        }
+                    // Try new schema first: payload.{type, message}
+                    let payload = v.get("payload");
+                    let payload_type = payload
+                        .and_then(|p| p.get("type"))
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("");
+                    let role_from_payload = match payload_type {
+                        "user_message" => Some("user"),
+                        "agent_message" => Some("assistant"),
+                        _ => None,
                     };
 
+                    let session_id_top = v.get("session_id").and_then(|s| s.as_str()).unwrap_or("");
+
+                    if let Some(role) = role_from_payload {
+                        // New schema path
+                        let session_id = if !session_id_top.is_empty() {
+                            session_id_top.to_string()
+                        } else if !current_session_id.is_empty() {
+                            current_session_id.clone()
+                        } else {
+                            continue; // can't tag a row without a session
+                        };
+                        let content = payload
+                            .and_then(|p| p.get("message"))
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if content.is_empty() {
+                            continue;
+                        }
+                        let ts = match parse_iso_timestamp(v.get("timestamp")) {
+                            Some(t) => t,
+                            None => match parse_timestamp(v.get("ts"), rec.offset) {
+                                Ok(t) => t,
+                                Err(_) => continue,
+                            },
+                        };
+                        rows.push(LedgerRow {
+                            session_id,
+                            tool: "codex".to_string(),
+                            ts,
+                            role: role.to_string(),
+                            content,
+                            tool_calls_json: None,
+                            files_touched_json: None,
+                            parent_id: None,
+                        });
+                        continue;
+                    }
+
+                    // Old schema fallback: top-level role/content/session_id
+                    let session_id = if !session_id_top.is_empty() {
+                        session_id_top.to_string()
+                    } else if !current_session_id.is_empty() {
+                        current_session_id.clone()
+                    } else {
+                        continue;
+                    };
+                    let ts = match parse_timestamp(v.get("ts"), rec.offset) {
+                        Ok(t) => t,
+                        Err(_) => continue,
+                    };
+                    let role = match v.get("role").and_then(|r| r.as_str()) {
+                        Some(r) => r.to_string(),
+                        None => continue,
+                    };
+                    let content = match v.get("content") {
+                        None => String::new(),
+                        Some(serde_json::Value::String(s)) => s.clone(),
+                        Some(arr) => match serde_json::to_string(arr) {
+                            Ok(s) => s,
+                            Err(_) => continue,
+                        },
+                    };
                     let tool_calls_val = v.get("tool_calls");
                     let tool_calls_json = extract_tool_calls(tool_calls_val);
                     let files_touched_json = extract_files_touched(tool_calls_val);
-
-                    // Codex v0.1 fixtures don't expose a parent chain.
-                    // A future PR can extend this when Codex surfaces parent ids.
-                    let parent_id: Option<String> = None;
-
                     rows.push(LedgerRow {
                         session_id,
                         tool: "codex".to_string(),
@@ -256,13 +400,10 @@ impl Adapter for CodexAdapter {
                         content,
                         tool_calls_json,
                         files_touched_json,
-                        parent_id,
+                        parent_id: None,
                     });
                 }
-                _ => {
-                    // Unknown record type — silently skip for forward compatibility.
-                    continue;
-                }
+                _ => continue,
             }
         }
 
@@ -356,6 +497,47 @@ fn parse_timestamp(val: Option<&serde_json::Value>, offset: u64) -> Result<i64, 
     }
 }
 
+/// Read just the first line of a file (for session_meta peeking).
+fn peek_first_line(path: &Path) -> Option<String> {
+    use std::io::{BufRead, BufReader};
+    let f = std::fs::File::open(path).ok()?;
+    let mut reader = BufReader::new(f);
+    let mut line = String::new();
+    reader.read_line(&mut line).ok()?;
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Read the first line of a Codex rollout file and extract `payload.cwd`
+/// from `session_meta`. Returns None if the file is missing/empty/malformed.
+fn peek_session_cwd(path: &Path) -> Option<String> {
+    use std::io::{BufRead, BufReader};
+    let f = std::fs::File::open(path).ok()?;
+    let mut reader = BufReader::new(f);
+    let mut line = String::new();
+    reader.read_line(&mut line).ok()?;
+    let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) != Some("session_meta") {
+        return None;
+    }
+    v.get("payload")
+        .and_then(|p| p.get("cwd"))
+        .and_then(|c| c.as_str())
+        .map(String::from)
+}
+
+/// Parse an ISO-8601 timestamp string (e.g. "2026-04-29T12:11:52.589Z") into
+/// unix epoch milliseconds. Returns None if the value is missing or unparseable.
+fn parse_iso_timestamp(val: Option<&serde_json::Value>) -> Option<i64> {
+    let s = val.and_then(|v| v.as_str())?;
+    let dt = chrono::DateTime::parse_from_rfc3339(s).ok()?;
+    Some(dt.timestamp_millis())
+}
+
 /// Extract `tool_calls` array if present, returning JSON-serialized form.
 fn extract_tool_calls(tool_calls: Option<&serde_json::Value>) -> Option<String> {
     let arr = tool_calls?.as_array()?;
@@ -420,6 +602,8 @@ mod tests {
             file_path: fixture_path(name),
             byte_offset: 0,
             last_event_seq: 0,
+            history_offset: 0,
+            project_dir: None,
         }
     }
 
@@ -575,6 +759,8 @@ mod tests {
             file_path: PathBuf::from("/etc/hostname"),
             byte_offset: 0,
             last_event_seq: 0,
+            history_offset: 0,
+            project_dir: None,
         };
         let err = a.read_new_records(&bad_cursor).unwrap_err();
         assert!(
@@ -616,6 +802,8 @@ mod tests {
             file_path: file_path.clone(),
             byte_offset: 0,
             last_event_seq: 0,
+            history_offset: 0,
+            project_dir: None,
         };
         // Because the cap truncates at the boundary, the partial tail beyond
         // the cap (or the actual partial line within the capped window) must
