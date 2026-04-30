@@ -53,6 +53,17 @@ pub struct CursorCursor {
     #[serde(default)]
     pub seen_prompts: HashMap<String, usize>,
 
+    /// Per-workspace-id: text of the most recently emitted prompt. Used to
+    /// recover the resume point even when Cursor truncates the prompts array
+    /// (the array is bounded — when the user types a new prompt, the oldest
+    /// gets dropped, so `seen_count == array_length` no longer means
+    /// "caught up"). On read we look for this text in the current array; if
+    /// found, we resume from the next index. If absent (truncated), we fall
+    /// back to emitting the full array — duplicates are filtered downstream
+    /// by progress-log dedupe and Task accumulation.
+    #[serde(default)]
+    pub last_prompt_text: HashMap<String, String>,
+
     /// Most recently active project path. Written here so that
     /// `infer_project_dir_from_cursor` in the pipeline can route fs-watcher
     /// events to the right `.carryover/` directory without re-reading headers.
@@ -314,10 +325,23 @@ fn is_safe_workspace_id(id: &str) -> bool {
 }
 
 /// Read new-style workspace prompts (plain `{text, commandType}` objects).
-/// Returns prompt texts for entries after `skip`.
-fn read_workspace_prompts(conn: &Connection, skip: usize) -> Result<Vec<String>, AdapterError> {
+///
+/// Returns prompts after the resume point. The resume point is determined by
+/// (in priority order):
+///   1. `last_text`: find the last occurrence of this text in the array, resume
+///      from the next index. Survives Cursor's bounded-array truncation.
+///   2. `skip_fallback`: legacy index-based skip (used on first upgrade when
+///      `last_text` is None).
+///
+/// On truncation (last_text not found in array), emits the full array — the
+/// progress-log and Task accumulators dedupe by content downstream.
+fn read_workspace_prompts(
+    conn: &Connection,
+    last_text: Option<&str>,
+    skip_fallback: usize,
+) -> Result<(Vec<String>, Option<String>), AdapterError> {
     let text = match read_item_value(conn, "aiService.prompts")? {
-        None => return Ok(vec![]),
+        None => return Ok((vec![], None)),
         Some(t) => t,
     };
 
@@ -328,9 +352,25 @@ fn read_workspace_prompts(conn: &Connection, skip: usize) -> Result<Vec<String>,
             source: e,
         })?;
 
-    let out = arr
+    let resume_index = match last_text {
+        Some(t) => arr
+            .iter()
+            .rposition(|item| item.get("text").and_then(|v| v.as_str()) == Some(t))
+            .map(|i| i + 1)
+            .unwrap_or(0), // not found = truncated, re-emit all (dedup handles)
+        None => skip_fallback.min(arr.len()),
+    };
+
+    // Capture the last prompt's text (for the next read's watermark) BEFORE
+    // we move arr into the iterator.
+    let new_last_text = arr
+        .last()
+        .and_then(|item| item.get("text").and_then(|v| v.as_str()))
+        .map(String::from);
+
+    let out: Vec<String> = arr
         .into_iter()
-        .skip(skip)
+        .skip(resume_index)
         .filter_map(|item| {
             item.get("text")
                 .and_then(|v| v.as_str())
@@ -339,7 +379,7 @@ fn read_workspace_prompts(conn: &Connection, skip: usize) -> Result<Vec<String>,
         })
         .collect();
 
-    Ok(out)
+    Ok((out, new_last_text))
 }
 
 /// Read generation timestamps; index-aligned with prompts.
@@ -373,7 +413,7 @@ fn read_new_schema(
     }
 
     // Most-recently-updated first; cap to bound I/O on large installs.
-    composers.sort_unstable_by(|a, b| b.last_updated_at_ms.cmp(&a.last_updated_at_ms));
+    composers.sort_unstable_by_key(|c| std::cmp::Reverse(c.last_updated_at_ms));
     composers.truncate(MAX_WORKSPACES_PER_POLL);
 
     // Most recently updated composer's path is the active project.
@@ -383,6 +423,7 @@ fn read_new_schema(
         .filter(|s| !s.is_empty());
 
     let mut new_seen_prompts = since.seen_prompts.clone();
+    let mut new_last_prompt_text = since.last_prompt_text.clone();
     let mut new_last_updated_at_ms = since.last_updated_at_ms;
     let mut all_msgs: Vec<ParsedMsg> = Vec::new();
 
@@ -396,19 +437,31 @@ fn read_new_schema(
             continue;
         }
 
-        // Use new_seen_prompts (already updated by earlier composers in this batch)
-        // so that two composers sharing the same workspace don't both re-read it.
-        let skip = new_seen_prompts
+        // Use new_* (already updated by earlier composers in this batch) so
+        // that two composers sharing the same workspace don't both re-read it.
+        let skip_fallback = new_seen_prompts
             .get(&composer.workspace_id)
             .copied()
             .unwrap_or(0);
+        let last_text = new_last_prompt_text
+            .get(&composer.workspace_id)
+            .map(|s| s.as_str());
 
         let (ws_conn, _ws_guard) = match open_with_fallback(&ws_db) {
             Ok(c) => c,
             Err(_) => continue,
         };
 
-        let new_prompts = read_workspace_prompts(&ws_conn, skip)?;
+        let (new_prompts, latest_array_text) =
+            read_workspace_prompts(&ws_conn, last_text, skip_fallback)?;
+
+        // Update last_prompt_text watermark to the LAST item in the array
+        // (regardless of whether we emitted any new prompts) so future reads
+        // can find the resume point even if Cursor truncates.
+        if let Some(t) = latest_array_text {
+            new_last_prompt_text.insert(composer.workspace_id.clone(), t);
+        }
+
         if new_prompts.is_empty() {
             continue;
         }
@@ -417,7 +470,7 @@ fn read_new_schema(
         let fallback_ts = composer.last_updated_at_ms;
 
         for (i, text) in new_prompts.iter().enumerate() {
-            let abs_idx = skip + i;
+            let abs_idx = skip_fallback + i;
             let ts = gen_timestamps.get(abs_idx).copied().unwrap_or(fallback_ts);
             all_msgs.push(ParsedMsg {
                 msg_id: format!("{}:prompt:{}", composer.composer_id, abs_idx),
@@ -430,7 +483,10 @@ fn read_new_schema(
             });
         }
 
-        new_seen_prompts.insert(composer.workspace_id.clone(), skip + new_prompts.len());
+        new_seen_prompts.insert(
+            composer.workspace_id.clone(),
+            skip_fallback + new_prompts.len(),
+        );
         if composer.last_updated_at_ms > new_last_updated_at_ms {
             new_last_updated_at_ms = composer.last_updated_at_ms;
         }
@@ -449,6 +505,7 @@ fn read_new_schema(
     let advanced = CursorCursor {
         last_updated_at_ms: new_last_updated_at_ms,
         seen_prompts: new_seen_prompts,
+        last_prompt_text: new_last_prompt_text,
         project_dir: new_project_dir,
         last_msg_id: String::new(),
     };
@@ -494,6 +551,7 @@ fn read_old_schema(
     let advanced = CursorCursor {
         last_updated_at_ms: since.last_updated_at_ms,
         seen_prompts: since.seen_prompts.clone(),
+        last_prompt_text: since.last_prompt_text.clone(),
         project_dir: since.project_dir.clone(),
         last_msg_id: new_last_msg_id,
     };

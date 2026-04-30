@@ -96,7 +96,7 @@ fn git_diff_summary(project_dir: &Path) -> Option<Vec<String>> {
             let count = stats.split_whitespace().next().unwrap_or("?");
             lines.push(format!("- {path}: {count} lines (+{plus} -{minus})"));
         }
-        if lines.len() >= MAX_ACTIVITY_FILES + 1 {
+        if lines.len() > MAX_ACTIVITY_FILES {
             break;
         }
     }
@@ -126,7 +126,7 @@ fn list_recent_modified(project_dir: &Path) -> Vec<String> {
         &mut scanned,
     );
 
-    entries.sort_by(|a, b| b.0.cmp(&a.0));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.0));
     entries.truncate(MAX_ACTIVITY_FILES);
 
     entries
@@ -170,7 +170,7 @@ fn walk(
             None => continue,
         };
 
-        if IGNORE_DIRS.iter().any(|d| *d == name) {
+        if IGNORE_DIRS.contains(&name) {
             continue;
         }
 

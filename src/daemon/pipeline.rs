@@ -651,7 +651,7 @@ fn find_codex_session_transcript(home_dir: &Path, project_dir: &Path) -> Option<
     if candidates.is_empty() {
         return None;
     }
-    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates.sort_by_key(|c| std::cmp::Reverse(c.0));
     // Limit how many we peek to avoid heavy I/O on long-lived installs.
     candidates.truncate(20);
 
