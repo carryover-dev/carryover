@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/carryover-dev/carryover/actions/workflows/codeql.yml"><img src="https://github.com/carryover-dev/carryover/actions/workflows/codeql.yml/badge.svg" alt="CodeQL" /></a>
-  <a href="https://www.npmjs.com/package/carryover"><img src="https://img.shields.io/npm/v/carryover/pre?label=npm&color=cb3837" alt="npm" /></a>
+  <a href="https://www.npmjs.com/package/carryover"><img src="https://img.shields.io/npm/v/carryover?label=npm&color=cb3837" alt="npm" /></a>
   <a href="https://crates.io/crates/carryover"><img src="https://img.shields.io/crates/v/carryover?label=crates.io&color=dea584" alt="crates.io" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License" /></a>
   <a href="https://github.com/carryover-dev/carryover/issues/3"><img src="https://img.shields.io/badge/status-alpha-orange" alt="Alpha" /></a>
@@ -17,13 +17,11 @@
 
 ---
 
-**Status: alpha — v0.1.0 in pre-release.**
+**Status: alpha — v0.1.4 shipping on Linux + macOS via npm, Homebrew, and crates.io.**
 
 <p align="center">
-  <img src="docs/media/cross-tool-demo.gif" alt="60-second cross-tool resume demo" width="720" />
+  <img src="docs/media/cross-tool-demo.gif" alt="Carryover pitch — cross-tool context handoff" width="820" />
 </p>
-
-<p align="center"><sub>Demo recorded on macOS at v0.1.0 ship; placeholder until then.</sub></p>
 
 ## What is Carryover?
 
