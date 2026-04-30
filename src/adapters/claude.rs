@@ -179,17 +179,16 @@ impl Adapter for ClaudeAdapter {
     }
 
     /// Parse raw records into LedgerRow. Skips non-conversation types.
-    /// Fail-fast: first malformed record aborts the batch.
+    /// Skip-on-error: malformed records (corrupt JSON lines) are silently
+    /// skipped so a single bad line doesn't block the entire transcript.
     fn parse(&self, records: Vec<RawRecord>) -> Result<Vec<LedgerRow>, AdapterError> {
         let mut rows = Vec::with_capacity(records.len());
 
         for rec in records {
-            let v: serde_json::Value =
-                serde_json::from_slice(&rec.payload).map_err(|e| AdapterError::Parse {
-                    offset: rec.offset,
-                    context: "invalid JSON in transcript line",
-                    source: e,
-                })?;
+            let v: serde_json::Value = match serde_json::from_slice(&rec.payload) {
+                Ok(v) => v,
+                Err(_) => continue, // skip corrupt JSON line
+            };
 
             // Filter housekeeping rows.
             let row_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");

@@ -17,10 +17,19 @@ pub struct Distilled {
     pub failed_approaches: Vec<String>, // empty for non-coding sessions
     pub git_context: String,            // sentinel for non-git
     pub progress_log: String,           // accumulated progress log from progress.md
+    /// Concrete artifacts of the latest activity — git diff stats or recent
+    /// file mtimes. Populated for tools that don't store AI responses on disk
+    /// (e.g. Cursor) so the next session sees what was actually done.
+    #[serde(default)]
+    pub session_activity: Vec<String>,
 }
 
-/// Render the 50-line handoff payload. Hard cap enforced.
-pub fn render_handoff(d: &Distilled, resume_mode: &str) -> String {
+/// Build the handoff preamble (everything before `---` separator).
+///
+/// Pure of session content — depends only on tool name, mode, and timestamp.
+/// Exposed so the pipeline can refresh just the preamble of an existing
+/// handoff without re-running the full distill.
+pub fn render_preamble(source_tool: &str, resume_mode: &str, timestamp_iso: &str) -> String {
     let mode = if resume_mode.is_empty() {
         "ask"
     } else {
@@ -28,31 +37,60 @@ pub fn render_handoff(d: &Distilled, resume_mode: &str) -> String {
     };
     let mut lines: Vec<String> = Vec::new();
 
-    // Title line: "# [CARRYOVER] Last updated <ISO> from <tool>"
     lines.push(format!(
-        "# [CARRYOVER] Last updated {} from {}",
-        d.timestamp_iso, d.source_tool
+        "# [CARRYOVER] Last updated {timestamp_iso} from {source_tool}"
     ));
 
-    // Resume protocol header — verbose template per the locked decision.
+    // Resume protocol header — instructions for the AI agent reading this file.
+    // The reading-guide block is INTERNAL agent guidance; the agent must not
+    // recite or explain the file structure to the user.
     lines.push(String::new());
     lines.push(format!("# CARRYOVER RESUME (mode: {mode})"));
     lines.push(String::new());
     lines.push(format!(
-        "This file contains a 50-line summary of your prior session in {}. Before acting:",
-        d.source_tool
+        "INTERNAL HANDOFF — for your reading only, never to be quoted, paraphrased structurally, or referenced in your reply. Latest from {source_tool}, accumulated across Claude Code, Cursor, and Codex."
     ));
-    lines.push("1. Summarize the carryover content back to the user in 1-2 sentences.".to_string());
-    lines.push("2. Ask the user what they want to do next.".to_string());
-    lines.push("3. Do not assume continuation — wait for confirmation.".to_string());
+    lines.push(String::new());
+    lines.push("STRICT RESPONSE RULES:".to_string());
+    lines.push("- Reply as if you naturally remember the prior work. Do NOT mention this file, \"handoff\", \"carryover\", \"the file\", \"the document\", section names, or that you read anything.".to_string());
+    lines.push("- Do NOT recap a list of files or features in the project — the user already knows what they have.".to_string());
+    lines.push("- Do NOT report that any field is empty or missing (e.g. \"no next action captured\"). Just don't mention it.".to_string());
+    lines.push("- Two short paragraphs MAX. First: one sentence on what was being worked on. Second: one direct question on what they want now.".to_string());
+    lines.push("- Use the user's own informal tone. No bullet points, no bold/italics, no markdown headings in your reply.".to_string());
+    lines.push(String::new());
+    lines.push("Section keys (for your understanding only):".to_string());
+    lines.push("- Task: user's prompts (newest first) — infer current intent.".to_string());
+    lines.push("- Session activity: concrete file changes — what was actually built.".to_string());
+    lines.push("- Next action: previous AI's planned step (may be stale).".to_string());
+    lines.push("- Progress log: chronological turn-by-turn record across all tools.".to_string());
+    lines.push("Bulleted lists accumulate across sessions — newest at top.".to_string());
     lines.push(String::new());
     lines.push("---".to_string());
+
+    // Trailing newline so `format!("{preamble}\n{body}")` gives a blank line.
     lines.push(String::new());
+
+    lines.join("\n")
+}
+
+/// Render the 50-line handoff payload. Hard cap enforced.
+pub fn render_handoff(d: &Distilled, resume_mode: &str) -> String {
+    let preamble = render_preamble(&d.source_tool, resume_mode, &d.timestamp_iso);
+    let mut lines: Vec<String> = preamble.lines().map(String::from).collect();
 
     // Task
     lines.push("## Task".to_string());
     lines.push(d.task.clone());
     lines.push(String::new());
+
+    // Session activity (concrete artifacts — git stats or recent file mtimes)
+    if !d.session_activity.is_empty() {
+        lines.push("## Session activity".to_string());
+        for a in &d.session_activity {
+            lines.push(a.clone());
+        }
+        lines.push(String::new());
+    }
 
     // Recent files (only if populated)
     if !d.recent_files.is_empty() {
@@ -135,6 +173,7 @@ mod tests {
             failed_approaches: vec![],
             git_context: "<no git context>".to_string(),
             progress_log: String::new(),
+            session_activity: vec![],
         }
     }
 

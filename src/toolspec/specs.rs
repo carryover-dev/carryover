@@ -178,6 +178,14 @@ static CURSOR_TRANSCRIPT_PATH: PathSpec = PathSpec {
     windows: &[],
 };
 
+/// Workspace-storage directory — where Cursor writes per-session prompt DBs.
+/// Watching this directory triggers re-ingestion whenever a prompt is saved.
+static CURSOR_WORKSPACE_STORAGE_PATH: PathSpec = PathSpec {
+    linux: &["~/.config/Cursor/User/workspaceStorage"],
+    macos: &["~/Library/Application Support/Cursor/User/workspaceStorage"],
+    windows: &[],
+};
+
 static CURSOR_HOOKSET_V040: HookSet = HookSet {
     session_start: "beforeSubmitPrompt",
     session_end: "stop",
@@ -200,7 +208,7 @@ pub static CURSOR: ToolSpec = ToolSpec {
     detect_binary: &["cursor"],
     detect_version: detect_version_cursor,
     config_paths: &[CURSOR_CONFIG_PATH],
-    transcript_paths: &[CURSOR_TRANSCRIPT_PATH],
+    transcript_paths: &[CURSOR_TRANSCRIPT_PATH, CURSOR_WORKSPACE_STORAGE_PATH],
     hooks_by_version: &CURSOR_HOOKS,
 };
 
@@ -215,6 +223,12 @@ fn detect_version_codex(binary: &Path) -> Result<Version, ToolSpecError> {
 static CODEX_CONFIG_PATH: PathSpec = PathSpec {
     linux: &["~/.codex/config.toml"],
     macos: &["~/.codex/config.toml"],
+    windows: &[],
+};
+
+static CODEX_HISTORY_PATH: PathSpec = PathSpec {
+    linux: &["~/.codex/history.jsonl"],
+    macos: &["~/.codex/history.jsonl"],
     windows: &[],
 };
 
@@ -246,7 +260,7 @@ pub static CODEX: ToolSpec = ToolSpec {
     detect_binary: &["codex"],
     detect_version: detect_version_codex,
     config_paths: &[CODEX_CONFIG_PATH],
-    transcript_paths: &[CODEX_TRANSCRIPT_PATH],
+    transcript_paths: &[CODEX_TRANSCRIPT_PATH, CODEX_HISTORY_PATH],
     hooks_by_version: &CODEX_HOOKS,
 };
 

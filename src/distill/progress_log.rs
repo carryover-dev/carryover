@@ -10,14 +10,6 @@ pub const MAX_ENTRY_CHARS: usize = 150;
 const SESSION_WATERMARK_PREFIX: &str = "<!-- session: ";
 const SESSION_WATERMARK_SUFFIX: &str = " -->";
 
-/// Return the session id stored in the watermark comment on line 1, or None.
-fn extract_session_watermark(existing: &str) -> Option<&str> {
-    let first_line = existing.lines().next()?;
-    first_line
-        .strip_prefix(SESSION_WATERMARK_PREFIX)?
-        .strip_suffix(SESSION_WATERMARK_SUFFIX)
-}
-
 /// Strip the watermark line (line 1) if present, returning the rest.
 fn strip_watermark(existing: &str) -> &str {
     let first_line = existing.lines().next().unwrap_or("");
@@ -28,29 +20,6 @@ fn strip_watermark(existing: &str) -> &str {
             .unwrap_or("")
     } else {
         existing
-    }
-}
-
-/// Build a one-liner summary of the previous session for use as a divider.
-fn prev_session_summary(existing: &str) -> String {
-    let stripped = strip_watermark(existing);
-    let date = stripped
-        .lines()
-        .find(|l| l.starts_with("- ["))
-        .and_then(|l| l.strip_prefix("- [").and_then(|s| s.split('T').next()))
-        .unwrap_or("unknown");
-    let task = stripped
-        .lines()
-        .find(|l| l.contains("] [user] "))
-        .and_then(|l| l.split("] [user] ").nth(1))
-        .unwrap_or("");
-    if task.is_empty() {
-        format!("_Previous session ({date})_")
-    } else {
-        format!(
-            "_Previous session ({date}): {}_",
-            truncate_at_word(task, 80)
-        )
     }
 }
 
@@ -134,56 +103,44 @@ fn ms_to_iso(ts_ms: i64) -> String {
 
 /// Merge `new_entries` into `existing_log`, deduplicating by timestamp.
 ///
+/// Always preserves existing entries — never resets on session change.
+/// The session watermark is updated each call so future sessions can detect
+/// the boundary if needed, but it does not cause a content wipe.
+///
 /// Returns the complete `.carryover/progress.md` contents: header,
-/// entries (old + new, sorted), and a `## What to do next` footer.
+/// entries (accumulated across all sessions), and a `## What to do next` footer.
 pub fn build_progress_log(
     existing: &str,
     new_entries: &[String],
     next_action: &str,
     session_id: &str,
 ) -> String {
-    // Detect whether we're in a new session.
-    let stored_session = extract_session_watermark(existing);
-    let is_new_session = match stored_session {
-        Some(id) => id != session_id && !session_id.is_empty(),
-        None => false, // no watermark = legacy file, keep accumulating
-    };
-
-    // Build the base entries block.
-    let base: String = if is_new_session {
-        format!(
-            "# Carryover Progress Log\n{}\n",
-            prev_session_summary(existing)
-        )
+    // Always keep existing entries regardless of session changes.
+    let stripped = strip_watermark(existing);
+    let entries_block = if let Some(idx) = stripped.find("\n## What to do next") {
+        stripped[..idx].trim_end()
     } else {
-        let stripped = strip_watermark(existing);
-        let entries_block = if let Some(idx) = stripped.find("\n## What to do next") {
-            stripped[..idx].trim_end()
-        } else {
-            stripped.trim_end()
-        };
-        if entries_block.is_empty() {
-            "# Carryover Progress Log\n".to_string()
-        } else {
-            format!("{entries_block}\n")
-        }
+        stripped.trim_end()
     };
-
-    // Timestamp watermark for deduplication (only meaningful when same session).
-    let last_ts: Option<String> = if is_new_session {
-        None
+    let base = if entries_block.is_empty() {
+        "# Carryover Progress Log\n".to_string()
     } else {
-        base.lines()
-            .rev()
-            .filter(|l| l.starts_with("- ["))
-            .find_map(|l| {
-                l.strip_prefix("- [")
-                    .and_then(|s| s.split(']').next())
-                    .map(|s| s.to_string())
-            })
+        format!("{entries_block}\n")
     };
 
-    // Only append entries newer than the watermark.
+    // Deduplicate: only append entries newer than the last recorded timestamp.
+    let last_ts: Option<String> = base
+        .lines()
+        .rev()
+        .filter(|l| l.starts_with("- ["))
+        .find_map(|l| {
+            l.strip_prefix("- [")
+                .and_then(|s| s.split(']').next())
+                .map(|s| s.to_string())
+        });
+
+    // Only append entries newer than the watermark, deduplicated by full line.
+    let mut seen_lines = std::collections::HashSet::new();
     let to_append: Vec<&str> = new_entries
         .iter()
         .filter(|e| {
@@ -191,10 +148,11 @@ pub fn build_progress_log(
                 .strip_prefix("- [")
                 .and_then(|s| s.split(']').next())
                 .unwrap_or("");
-            match &last_ts {
+            let ts_ok = match &last_ts {
                 Some(last) => entry_ts > last.as_str(),
                 None => true,
-            }
+            };
+            ts_ok && seen_lines.insert(e.as_str())
         })
         .map(|s| s.as_str())
         .collect();
