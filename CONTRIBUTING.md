@@ -13,7 +13,7 @@ This document describes how to contribute, what to expect from the maintainer, a
 ## Ground rules
 
 - Be kind. The [Code of Conduct](./CODE_OF_CONDUCT.md) applies to every space connected to this project.
-- Open an issue before opening a non-trivial pull request. Drive-by PRs that change architecture or add new tool integrations without prior discussion will be closed warmly with a pointer back here.
+- Open an issue before opening a non-trivial pull request. PRs that change architecture without prior discussion or add new tool integrations will be closed warmly with a pointer back here.
 - Carryover is a contextless-design project. Any proposal that requires the agent to do bookkeeping inside its own context window is out of scope by construction.
 
 ## Scope
