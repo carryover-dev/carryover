@@ -51,7 +51,7 @@ jobs:
       # trufflehog OSS is free, well-maintained, and integrates the same way.
       # Pinned to a versioned tag (NOT @main) so a malicious commit to the
       # action repo cannot land in our CI without an explicit version bump.
-      - uses: trufflesecurity/trufflehog@v3.92.1
+      - uses: trufflesecurity/trufflehog@v3.95.2
         with:
           path: ./
           base: ${{ github.event.pull_request.base.sha || github.event.before }}
